@@ -33,7 +33,7 @@ system:inbox
   This tag filters for files that have not yet been marked as archived, similiar how a email inbox works. Archiving a file is usually a manual process by the user, where he selects files or has a file open and actively uses a shortcut or ui element to mark the files as archived. Once archived the files will not be returned in queries with the "system:inbox" tag, instead they will appear in the "system:archive" system tag. A inboxed file is in a state where it is not decided if they file should be kept or in a state where a file was not yet checked. Use the "system:inbox" tag, when the user wants to see something new or looks for files add tags to. Files that are added to hydrus have by default the "inbox" state.
 system:archive
   usage: "system:archive"
-  Marked files that we have most probably manually checked and decided to keep. These files have usually tags on the local tag service.
+  Marked files that we have most probably manually checked and decided to keep.
 system:dimensions
 system:duration
 system:file properties
