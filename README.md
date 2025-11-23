@@ -12,26 +12,42 @@ git copy #WIP
 
 Add Credentials
 edit the hydrus_clients.json.template file, and add your credentials there, then remove the ".template" from the end of the filename and save it so it's named "hydrus_clients.json" after that.
-You can use whatever name you want, but it makes sense to keep it short, I use 2 letter codes to reduce token use per call. 
+You can use whatever name you want, but it makes sense to keep it short, I use 2 letter codes to reduce token use per call. Adding credentials over the docker secrets hasn't worked so far, the code will probably be removed at a later stage.
 
 Build
 docker build -t hydrus-mcp-server -f ./Dockerfile .
 
-Add to Docker Catalogue
-I have not figured out yet how to a diffrent catalogue than the default one, my solution is probably overly complicated but that was based on a tutorial that I found helpful accomplish it working and found others a bit overwhelming.
-
-Add this to the lm studio tools file
+Add Docker Catalogue
+Copy the hydrus_mcp.yaml to the docker catalogue folder.
 
 
+The Docker MCP catalog directory is typically located at:
+```
+%USERPROFILE%\.docker\mcp\catalogs
+```
 
-add the character prompt to your frontend (LMStudio, OpenWebUI, ...) where you use your LLM to the system prompt or if it has the character prompt.
+On Windows, you can open this folder by:
+1. Press `Win + R` to open the Run dialog
+2. Type `%USERPROFILE%\.docker\mcp\catalogs` and press Enter
+
+Copy the hydrus_mcp.yaml file to this directory, This is where Docker will look for MCP catalog definitions.
+
+Add the content of the mcp_lm.json to your lm studio mcp.json file. Be smart about it: If this is your only mcp server in lm studio then you can just paste the contents to the mcp.json, if you already have mcp server set up then add the content manually in the right level of the hierarchy to not break anything (basically append json data with the right brackets and position).
+
+add the character prompt to your frontend (LMStudio, OpenWebUI, ...) where you use your LLM to the system prompt or if it has the character prompt. (#WIP, prompt is in the works)
 The LLM should be able to use the tools without the character prompt but it will probably require a lot of user input to make it work well.
 
-
+_Now it should work_™
 
 # Roadmap / Ideas
 
 - Create a single client version -> to save tokens, ease up setup
+- have diffrent profiles with default limits for diffrent sized context windows
+- explore idea of using the description field of a client to add very detailed context about the content, special tags meanings etc.
+
+# Todo 
+- provide character.md
+- provide parcour.md - a test prompt you can give the llm to see if all works well
 
 
 # Issues and Limitations
