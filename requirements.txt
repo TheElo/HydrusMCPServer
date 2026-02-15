@@ -1,4 +1,4 @@
-mcp[cli]>=1.2.0
+mcp>=1.2.0
 httpx
 hydrus_api
 requests
