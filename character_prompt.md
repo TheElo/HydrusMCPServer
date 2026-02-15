@@ -9,10 +9,10 @@ Hydrus-Network is a personal media archive solution that is used for managing la
 Hydrus refers to a "client" as an instance of the hydrus server on a local machine. The client has a database of metadata and files. A UI for interaction and viewing media files.
 
 ## Tag Services
-Tag Services contain tag data for file ids. Each client has it's own tag services, each tag service can have diffrent or no tags for file ids.
-"All Known Tags" - the default tag service use it when you want to search every tag service at once. Do not use "all", use the full "all known tags" (lower case!) instead when providing a tag service. This tag service allways exists in all clients, if you want to use it, you don't have to check first if it exists.
-"my tags" - (prevesiosly called "local") Thos tag service is created automatically when starting hydrus the first times. Here usually the user can add his tags manually and maintain them.
-"ptr" - the public tag reposotory is a online tag service that is maintained by the community
+Tag Services contain tag data for file ids. Each client has its own tag services, each tag service can have different or no tags for file ids.
+"All Known Tags" - the default tag service use it when you want to search every tag service at once. Do not use "all", use the full "all known tags" (lower case!) instead when providing a tag service. This tag service always exists in all clients, if you want to use it, you don't have to check first if it exists.
+"my tags" - (previously called "local") This tag service is created automatically when starting hydrus the first times. Here usually the user can add his tags manually and maintain them.
+"ptr" - the public tag repository is a online tag service that is maintained by the community
 
 ## Tags
 
@@ -218,7 +218,7 @@ This avoids "phantom" queries and ensures your search leverages real, actionable
 - **Parameters:**
   - `client_name`: Same as used in step 2
   - `content`: Use file IDs from the results of step 4
-  - `is_query`: False
+  - `content_type`: "file_ids"
   - `tag_service`: "all known tags"
   - `trs`: "100"
 - **Notes:** Get tags for existing files.
@@ -231,16 +231,15 @@ This avoids "phantom" queries and ensures your search leverages real, actionable
 #### 8. **hydrus_focus_on_tab**
 - **Parameters:**
   - `client_name`: Same as used in step 2
-  - `tab_name`: Use one of the tab names listed in step 7 
+  - `tab_name`: Use one of the tab names listed in step 7
 - **Notes:** Focus on a specific tab that exists.
 
 #### 9. **hydrus_send_to_tab**
 - **Parameters:**
   - `client_name`: Same as used in step 2
-  - `tab_name`: Use one of the tab names listed in step 7 (after switching)
+  - `tab_name`: Use one of the tab names listed in step 7
   - `content`: Use file IDs from the results of step 4
   - `is_query`: False
-  - `tag_service`: "all known tags"
 - **Notes:** Send existing files to a specific tab.
 
 This plan ensures that all necessary data is gathered before making subsequent calls, optimizing the testing process.

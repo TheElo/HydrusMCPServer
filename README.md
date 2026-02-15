@@ -7,90 +7,137 @@ An MCP Server for Hydrus Network. Connecting your LLM to an elaborate and very p
 
 ![tag_analysis.jpg]
 
+# Tools
+
+The Hydrus MCP Server provides the following tools:
+
+1. `hydrus_available_clients()` - Check which Hydrus clients are available for use
+2. `hydrus_available_tag_services(client_name)` - Get available tag services for a specific Hydrus client
+3. `hydrus_search_tags(client_name, search, tag_service, limit)` - Search for tags in Hydrus using keywords and wildcards
+4. `hydrus_query(client_name, query, tag_service, file_sort_type, trs)` - Query files in the Hydrus client using various search criteria
+5. `hydrus_get_tags(client_name, content, content_type, tag_service, trs, limit, result_limit)` - Get tags for files in Hydrus client
+6. `hydrus_get_file_metadata(client_name, file_id)` - Get metadata for a file by its ID
+7. `hydrus_get_page_info(client_name, page_key)` - Get page information for a specific tab using its page key
+8. `hydrus_list_tabs(client_name, return_tab_keys)` - List open tabs in a Hydrus client
+9. `hydrus_focus_on_tab(client_name, tab_name)` - Focus the Hydrus client on a specific tab
+10. `hydrus_send_to_tab(client_name, tab_name, content, is_query, tag_service)` - Send files to a specific tab in Hydrus client
+11. `hydrus_send(client_name, link, service_names_to_additional_tags, subdir, max_depth, filename, destination_page_name)` - Send a link to be downloaded to Hydrus
+
+# Abilities
+
+The server enables the LLM to:
+
+- **Discover and connect** to multiple Hydrus clients simultaneously
+- **Search and query** files using complex tag syntax with wildcards
+- **Analyze tag distributions** across large file collections with summary views
+- **Retrieve detailed metadata** for individual files including timestamps, file types, and all associated tags
+- **Manage tabs and pages** within Hydrus client interface
+- **Send files for download** from URLs with optional recursive directory scraping
+- **Organize files** by sending them to specific tabs with custom tags
+- **Handle large result sets** with configurable limits and threshold-based summary views
+
 ## Example Prompts
 
 ...
 
 # Setup
 
-You need to have Docker (I use Desktop, Windows 7) installed. I've tried it with LMStudio and would recommend that for now as it gives the most control and shows all the data returned, which is great for inspection.
-In terms of models I use Devstral-2507, but any agentic model that can use tools should be good. Having a large context window can also be useful to manage all the data.
+## UVX Setup
+To configure with LM Studio, use this JSON configuration:
 
+```json
+{
+	"mcpServers": {
+		"hydrus-mcp-server": {
+			"command": "uvx",
+			"args": [
+				"hydrus-mcp"
+			],
+			"env": {
+				"HYDRUS_CLIENTS": "[[\"Name1\", \"http://192.168.1.20:45869/\", \"APIKEY1\"], [\"Name2\", \"http://192.168.1.20:45870/\", \"APIKEY2\"]"
+			},
+			"timeout": 360000
+		}
+	}
+}
+```
 
-## Docker Setup 
+## UV Setup (Local Development)
 
-###  Clone the Repo
+The UV setup is the new recommended method for running the Hydrus MCP Server. It uses uv (a Python package manager) to manage dependencies and run the server.
+
+### Clone the Repo
 Clone the repository to a directory of your choice, open a command prompt there, and run:
 
 ```bash
 git clone https://github.com/TheElo/HydrusMCPServer
 ```
 
-###  Add Credentials
-Edit the `hydrus_clients.json.template` file, and add your credentials there. Then remove the ".template" extension and save it as "hydrus_clients.json".
-You can use any name you prefer, but keeping it short is advisable. I use 2-letter codes to reduce token usage per call. Note that adding credentials via Docker secrets hasn't worked reliably yet, and this functionality may be removed in future versions.
+### Install uv
+If you don't have uv installed, install it with:
 
-
-### Build The Imagge
-```
-docker build -t hydrus-mcp-server -f ./Dockerfile .
+```bash
+pip install uv
 ```
 
-### Add Docker Catalogue
-Copy the `hydrus_mcp.yaml` to the docker catalogue folder.
 
+### Install dependencies
+Run `uv sync` to create the virtual environment and install all dependencies:
 
-The Docker MCP catalog directory is typically located at:
-
-On Windows:
-```
-%USERPROFILE%\.docker\mcp\catalogs
+```bash
+uv sync
 ```
 
-You can open this folder by:
-1. Press `Win + R` to open the Run dialog
-2. Type `%USERPROFILE%\.docker\mcp\catalogs` and press Enter
+### Add LM Studio MCP Configuration
 
-Copy the `hydrus_mcp.yaml` file to this directory. This is where Docker will look for MCP catalog definitions.
+Add this configuration to your LM Studio mcp.json file. If you don't use LM Studio then you maybe need to remove the timeout block as it's maybe LM Studio specific. 
 
+1. Replace the path to where you downloaded the github project ()"c:/PATH/TO/WHERE/UV/PROJECT/IS/HydrusMCPServer")
+2. Configure your Hydrus client(s) by giving them a short name, the right adress and api key
 
-#### Docker MCP Registry Configuration
-edit the registry file:
-
+```json
+{
+	"mcpServers": {
+		"hydrus-mcp-server": {
+			"command": "uv",
+			"args": [
+				"run",
+				"--project",
+				"c:/PATH/TO/WHERE/UV/PROJECT/IS/HydrusMCPServer",
+				"-m",
+				"hydrus_mcp.server"
+			],
+			"env": {
+				"HYDRUS_CLIENTS": "[[\"Name1\", \"http://192.168.1.20:45869/\", \"APIKEY1\"], [\"Name2\", \"http://192.168.1.20:45870/\", \"APIKEY2\"]]"
+			},
+			"timeout": 360000
+		}
+	}
+}
 ```
-%USERPROFILE%\.docker\mcp\registry.yaml
-```
 
-Add this `registry.yaml` entry under the existing `registry:` key:
-
-```yaml
-registry:
-  hydrus:
-    ref: ""
-```
-
-## LM Studio Setup
-
-### Edit the mcp.json
-Add the content of `mcp_lm.json` to your LM Studio's `mcp.json` file. If this is your only MCP server, simply paste the contents into `mcp.json`. If you already have other MCP servers configured, add the content manually at the appropriate level in the hierarchy to avoid breaking anything. If you don't use LM Studio, then you can remove the `timeout` in case it might create compatability issues.
+If this is your only MCP server, simply paste the contents into `mcp.json`. If you already have other MCP servers configured, add the content manually at the appropriate level in the hierarchy to avoid breaking anything.
 
 ### Add Context to Character
-Add the character prompt to your frontend (LM Studio, OpenWebUI, etc.) where you use your LLM. Include it in the system prompt or use it as a character prompt. The LLM should be able to use the tools without the character prompt but it will probably require a lot of user input to make it work well.
+Add the provided character prompt to your frontend (LM Studio, OpenWebUI, etc.) where you use your LLM or create your own. Using hydrus is a intricate task, context can help a lot to make the llm behave as you expect it would. Include it in the system prompt or use it as a character prompt. The LLM should be able to use the tools without the character prompt but it will probably require a lot of user input to make it work well or a lot of trial and error by the llm.
 
 
 _Now it should work_™
 
+# Tipps & Tricks
+- provide more context about your structure, content, usecases, strategies as context to your llm either in the chat or in the agent prompt. Hydrus is tricky to use already for a human, a llm needs also some context to understand how to use the tools and when. 
+- Use short names (like 2 letter codes) for your clients to save tokens per call
+
 # Roadmap / Ideas
 
 - adding tag suggestion functionality
-- Have different profiles with default limits for different sized context windows
+- better context size managment and settings
 - Explore using the description field of clients to provide detailed context about content and special tag meanings.
 
-On Hold
-- Create a singular client version to reduce token usage and streamline setup -> on hold, not necessary at this stage, only minor performance expected (slightly less token use)
 
 # Todo 
 - Provide `parcour.md` - a test prompt to verify system functionality.
+- enhance env variables to alter default settings
 
 # Issues and Limitations
 You may quickly exceed your context window limit if you set the default limits too generously.

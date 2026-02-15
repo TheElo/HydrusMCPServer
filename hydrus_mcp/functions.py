@@ -1,54 +1,53 @@
 import hydrus_api, hydrus_api.utils, logging, os, json
+from typing import List, Dict
 
-logger = logging.getLogger("functions")
+logger = logging.getLogger("hydrus_mcp.functions")
 
-def load_clients_from_secret():
-    """Load client credentials from environment variable or Docker secrets"""
-    # Try to read from the Docker secret file if it exists
-    secret_file = "/run/secrets/HYDRUS_CLIENTS"
-    if os.path.exists(secret_file):
-        try:
-            with open(secret_file, 'r') as f:
-                clients_secret = f.read().strip()
-            logger.info("Loaded HYDRUS_CLIENTS from Docker secret file")
-        except Exception as e:
-            logger.error(f"Failed to read HYDRUS_CLIENTS secret file: {e}")
-            return []
-    else:
-        logger.debug(f"Secret file not found at {secret_file}, checking environment variable")
-        # Fallback to environment variable
-        clients_secret = os.environ.get("HYDRUS_CLIENTS", "[]").strip()
 
+def load_clients_from_secret() -> List[Dict[str, str]]:
+    """Load client credentials from environment variable
+    
+    Returns:
+        List of client dictionaries with name, url, apikey, and description
+    """
+    clients_secret = os.environ.get("HYDRUS_CLIENTS", "[]").strip()
+    
     try:
-        # Parse the JSON string to get client list
         clients = json.loads(clients_secret)
-        logger.info(f"Loaded {len(clients)} Hydrus clients from secrets")
+        logger.info(f"Loaded {len(clients)} Hydrus clients from environment variable")
         logger.debug(f"Raw clients data: {clients_secret}")
-
-        # Validate each client entry has required fields
+        
         valid_clients = []
         for client in clients:
-            if len(client) >= 3:  # At least client_name, url, apikey
+            if len(client) >= 3:
                 client_name = client[0]
                 url = client[1]
                 apikey = client[2]
                 description = client[3] if len(client) > 3 else ""
-
+                
                 valid_clients.append({
                     "name": client_name,
                     "url": url,
                     "apikey": apikey,
                     "description": description
                 })
-
+        
         return valid_clients
     except (json.JSONDecodeError, TypeError) as e:
-        logger.error(f"Failed to parse HYDRUS_CLIENTS secret: {e}")
+        logger.error(f"Failed to parse HYDRUS_CLIENTS: {e}")
         logger.debug(f"Raw clients data that failed to parse: {repr(clients_secret)}")
         return []
 
-def get_client_by_name(client_name):
-    """Get a Hydrus client by name"""
+
+def get_client_by_name(client_name: str) -> hydrus_api.Client | None:
+    """Get a Hydrus client by name (returns client object)
+    
+    Args:
+        client_name: The name of the client to find
+        
+    Returns:
+        hydrus_api.Client instance or None if not found
+    """
     clients = load_clients_from_secret()
     for client in clients:
         if client["name"].lower() == client_name.lower():
@@ -57,6 +56,7 @@ def get_client_by_name(client_name):
             except Exception as e:
                 logger.error(f"Failed to create client {client_name}: {e}")
                 return None
+    return None
 
 def get_page_info(client_obj, page_key):
     """Get page information for a specific tab using its page key"""
@@ -65,7 +65,6 @@ def get_page_info(client_obj, page_key):
     except Exception as e:
         logger.error(f"Failed to get page info for page_key {page_key}: {e}")
         return None
-    return None
 
 def get_service_key_by_name(client, service_name):
     """Get the service key for a given service name"""
@@ -274,8 +273,6 @@ def parse_hydrus_tags(query, additional_tags=None):
                     return tags
                 else:
                     # No OR groups, just split by commas (preserving complex tags)
-                    import re
-
                     def split_preserving_complex_tags(text):
                         """Split text by commas while preserving complex tags"""
                         if not text:
@@ -345,3 +342,68 @@ def parse_hydrus_tags(query, additional_tags=None):
                         additional_tags = [additional_tags]
                     result.extend(additional_tags)
                 return result
+
+
+def find_page_by_name(pages_list: list, tab_name: str) -> dict | None:
+    """Recursively search for a page by name (case-insensitive)
+    
+    Args:
+        pages_list: List of page dictionaries from get_pages() response
+        tab_name: Name of the tab to find
+        
+    Returns:
+        Page dictionary if found, None otherwise
+    """
+    for page_info in pages_list:
+        if not isinstance(page_info, dict):
+            logger.error(f"Unexpected page_info format: {type(page_info).__name__}")
+            continue
+        
+        name = page_info.get('name', '')
+        title = page_info.get('title', '')
+        
+        if (tab_name.lower() == name.lower()) or (tab_name.lower() == title.lower()):
+            return page_info
+        
+        if 'pages' in page_info:
+            nested_page = find_page_by_name(page_info['pages'], tab_name)
+            if nested_page:
+                return nested_page
+    
+    return None
+
+
+def extract_tabs_from_pages(pages_list: list, return_keys: bool = False) -> tuple[list, list]:
+    """Extract tab names and optionally keys from pages
+    
+    Args:
+        pages_list: List of page dictionaries
+        return_keys: Whether to extract page keys
+        
+    Returns:
+        Tuple of (tab_names, tab_keys)
+    """
+    tabs = []
+    tab_keys = []
+    
+    for page_info in pages_list:
+        if not isinstance(page_info, dict):
+            logger.error(f"Unexpected page_info format: {type(page_info).__name__}")
+            continue
+        
+        name = page_info.get('name', page_info.get('title', f"Page {page_info.get('id', 'unknown')}"))
+        tabs.append(name)
+        
+        if return_keys:
+            page_key = page_info.get('page_key')
+            if page_key:
+                tab_keys.append(page_key)
+            else:
+                logger.warning(f"No page_key found for tab: {name}")
+        
+        if 'pages' in page_info:
+            nested_tabs, nested_keys = extract_tabs_from_pages(page_info['pages'], return_keys)
+            tabs.extend(nested_tabs)
+            tab_keys.extend(nested_keys)
+    
+    return tabs, tab_keys

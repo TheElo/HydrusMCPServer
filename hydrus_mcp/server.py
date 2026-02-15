@@ -6,9 +6,10 @@ from datetime import datetime, timezone
 import httpx
 import hydrus_api, hydrus_api.utils
 from mcp.server.fastmcp import FastMCP
+from typing import Optional
 
 # Import utility functions from the local module
-from functions import get_tags, get_tags_summary, parse_hydrus_tags, get_client_by_name, load_clients_from_secret, get_service_key_by_name, get_page_info
+from .functions import get_tags, get_tags_summary, parse_hydrus_tags, get_client_by_name, load_clients_from_secret, get_service_key_by_name, get_page_info, find_page_by_name, extract_tabs_from_pages
 
 # Configure logging to stderr
 logging.basicConfig(
@@ -16,7 +17,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     stream=sys.stderr
 )
-logger = logging.getLogger("hydrus-server")
+logger = logging.getLogger("hydrus_mcp.server")
 
 # Initialize MCP server - NO PROMPT PARAMETER!
 mcp = FastMCP("hydrus")
@@ -31,7 +32,7 @@ async def hydrus_available_clients() -> str:
     clients = load_clients_from_secret()
 
     if not clients:
-        return "❌ Error: No Hydrus clients configured. Set HYDRUS_CLIENTS secret with client credentials."
+        return "❌ Error: No Hydrus clients configured. Set HYDRUS_CLIENTS environment variable with client credentials."
 
     result = ""
 
@@ -175,7 +176,7 @@ async def hydrus_query(client_name: str = "", query: str = "", tag_service: str 
         tag_service (str): The tag service to use for the search. Default is "all known tags".
                            You can specify a specific tag service name if needed.
         file_sort_type (str): Sorting method for files. Default is "13" (sorted by "has audio" as this is the fastest search).
-                              Other values may be supported depending on the Hydrus client version.
+                               Other values may be supported depending on the Hydrus client version.
         trs (str): Threshold for returning results. Default is "100".
                    If the number of matching files exceeds this threshold,
                    only a subset will be returned with information about the total count.
@@ -236,7 +237,7 @@ async def hydrus_query(client_name: str = "", query: str = "", tag_service: str 
         if int(trs) < count:
             # file_ids = file_ids["file_ids"][:10] #v
             file_ids = file_ids[:10]
-            return f"Found {count} files, more than the treshold of {trs}, here are 10 the first 10 file ids from the results: {file_ids}"
+            return f"Found {count} files, more than the threshold of {trs}, here are 10 the first 10 file ids from the results: {file_ids}"
 
         if len(file_ids) == 0:
             response = {"error": f"No files found for the query '{query}' on the client '{client_name}' in the tag service '{tag_service}'. Ensure that your query is correctly formatted, the tags exist on that tag service in that client or that there are actually existing files with that tag combination"}
@@ -337,7 +338,6 @@ async def hydrus_get_tags(client_name: str = "", content: str = "", content_type
                 if result_count == 0:
                     return f"❌ No files found for query '{tags}' (count: {result_count})'"
 
-
             except json.JSONDecodeError as e:
                 return f"❌ Error: Invalid response from query - {str(e)}, content: {content}, content_type: {content_type}, tag_service: {tag_service}, trs = {trs}"
             except Exception as e:
@@ -376,11 +376,11 @@ async def hydrus_get_tags(client_name: str = "", content: str = "", content_type
 
                 except json.JSONDecodeError as e:
                     return f"❌ Error: Could not parse page information JSON - {str(e)}. Raw response: {page_info_result}"
-    
+        
                 # Handle case where no file IDs were found
                 if not file_ids:
                     return f"❌ Error: No media files found in page key '{content}'. The page may not contain any files with tags."
-    
+        
             except Exception as e:
                 return f"❌ Error: Failed to process page key '{content}' - {str(e)}"
         else:  # content_type == "file_ids"
@@ -418,7 +418,7 @@ async def hydrus_get_tags(client_name: str = "", content: str = "", content_type
 
 @mcp.tool()
 async def hydrus_get_file_metadata(client_name: str = "", file_id: str = "") -> str:
-    """Get metadata for a file by its ID from a specific client. Warning: This function returns a lot of data and therefore should be only used when something has not enough tags or a deep inspection of the metadata is necessary."""
+    """Get metadata for a file by it's ID from a specific client. Warning: This function returns a lot of data and therefore should be only used when something has not enough tags or a deep inspection of the metadata is necessary. The file_id is expected to be in quotes for this function to work properly."""
     if not client_name.strip():
         return "❌ Error: Client name is required"
     if not file_id.strip():
@@ -430,7 +430,12 @@ async def hydrus_get_file_metadata(client_name: str = "", file_id: str = "") -> 
         return f"❌ Error: Could not connect to client '{client_name}'. Available clients: {', '.join([c['name'] for c in load_clients_from_secret()])}"
 
     try:
-        file_id_int = int(file_id)
+        # Strip quotes from file_id if present (models often send quoted numbers)
+        file_id_stripped = file_id.strip()
+        if (file_id_stripped.startswith('"') and file_id_stripped.endswith('"')) or \
+           (file_id_stripped.startswith("'") and file_id_stripped.endswith("'")):
+            file_id_stripped = file_id_stripped[1:-1]
+        file_id_int = int(file_id_stripped)
         metadata = client_obj.get_file_metadata(file_ids=[file_id_int])
         # metadata = metadata["metadata"] # doing that causes a issue where the "items" cannot be found in the later code.
 
@@ -448,7 +453,8 @@ async def hydrus_get_file_metadata(client_name: str = "", file_id: str = "") -> 
         return f"❌ Error: Invalid file ID - must be a number: {file_id}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
-    
+
+
 @mcp.tool()
 async def hydrus_get_page_info(client_name: str = "", page_key: str = "") -> str:
     """Get page information for a specific tab using its page key.
@@ -474,7 +480,7 @@ async def hydrus_get_page_info(client_name: str = "", page_key: str = "") -> str
     try:
         page_info = get_page_info(client_obj, page_key)
         if not page_info:
-            return "❌ Error: Failed to retrieve page information"
+            return "❌ Error: Failed to retrieve page information. Did you actually use a page key from hydrus_list_tabs with return_page_keys set to 'true'?"
 
         # Format the output
         result = f"✅ Page Information for key '{page_key}' (from {client_name}):"
@@ -490,7 +496,7 @@ async def hydrus_get_page_info(client_name: str = "", page_key: str = "") -> str
         return f"❌ Error: Method not found in client API: {e}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
-    
+
 
 @mcp.tool()
 async def hydrus_list_tabs(client_name: str = "", return_tab_keys: bool = False) -> str:
@@ -541,34 +547,7 @@ async def hydrus_list_tabs(client_name: str = "", return_tab_keys: bool = False)
             return f"❌ Error: Failed to get pages: {str(e)}"
 
         # Extract tab names and optionally keys from the page list (including nested pages)
-        tabs = []
-        tab_keys = []
-
-        def extract_tabs_from_pages(pages_list):
-            """Recursively extract tab names and keys from a list of pages"""
-            for page_info in pages_list:
-                # Validate that each page_info is a dictionary
-                if not isinstance(page_info, dict):
-                    logger.error(f"Unexpected page_info format: {type(page_info).__name__}. Content: {str(page_info)[:200]}")
-                    continue
-
-                # Prioritize name field, fall back to title or page ID
-                name = page_info.get('name', page_info.get('title', f"Page {page_info.get('id', 'unknown')}"))
-                tabs.append(name)
-
-                # Get the page key if available and requested
-                if return_tab_keys:
-                    page_key = page_info.get('page_key')
-                    if page_key:
-                        tab_keys.append(page_key)
-                    else:
-                        logger.warning(f"No page_key found for tab: {name}")
-
-                # Recursively extract tabs from nested pages if they exist
-                if 'pages' in page_info:
-                    extract_tabs_from_pages(page_info['pages'])
-
-        extract_tabs_from_pages(page_list)
+        tabs, tab_keys = extract_tabs_from_pages(page_list, return_keys=return_tab_keys)
 
         result = f"✅ Open tabs for {client_name}: "
         if not tabs:
@@ -632,31 +611,6 @@ async def hydrus_focus_on_tab(client_name: str = "", tab_name: str = "") -> str:
             return f"❌ Error: Method not found in client API: {e}"
         except Exception as e:
             return f"❌ Error: Failed to get pages: {str(e)}"
-
-        target_page = None
-
-        def find_page_by_name(pages_list, tab_name):
-            """Recursively search for a page by name"""
-            for page_info in pages_list:
-                # Validate that each page_info is a dictionary
-                if not isinstance(page_info, dict):
-                    logger.error(f"Unexpected page_info format: {type(page_info).__name__}. Content: {str(page_info)[:200]}")
-                    continue
-
-                name = page_info.get('name', '')
-                title = page_info.get('title', '')
-
-                # Check if this is the page we're looking for
-                if (tab_name.lower() == name.lower()) or (tab_name.lower() == title.lower()):
-                    return page_info
-
-                # Recursively search nested pages
-                if 'pages' in page_info:
-                    nested_page = find_page_by_name(page_info['pages'], tab_name)
-                    if nested_page:
-                        return nested_page
-
-            return None
 
         target_page = find_page_by_name(page_list, tab_name)
 
@@ -798,32 +752,6 @@ async def hydrus_send_to_tab(client_name: str = "", tab_name: str = "", content:
         except Exception as e:
             return f"❌ Error: Failed to get pages: {str(e)}"
 
-        # Find the target tab
-        target_page = None
-
-        def find_page_by_name(pages_list, tab_name):
-            """Recursively search for a page by name"""
-            for page_info in pages_list:
-                # Validate that each page_info is a dictionary
-                if not isinstance(page_info, dict):
-                    logger.error(f"Unexpected page_info format: {type(page_info).__name__}. Content: {str(page_info)[:200]}")
-                    continue
-
-                name = page_info.get('name', '')
-                title = page_info.get('title', '')
-
-                # Check if this is the page we're looking for
-                if (tab_name.lower() == name.lower()) or (tab_name.lower() == title.lower()):
-                    return page_info
-
-                # Recursively search nested pages
-                if 'pages' in page_info:
-                    nested_page = find_page_by_name(page_info['pages'], tab_name)
-                    if nested_page:
-                        return nested_page
-
-            return None
-
         target_page = find_page_by_name(page_list, tab_name)
 
         if not target_page:
@@ -841,20 +769,224 @@ async def hydrus_send_to_tab(client_name: str = "", tab_name: str = "", content:
         except:
             return f"❌ Error: {str(Exception)}"
 
-
     except AttributeError as e:
         return f"❌ Error: Method not found in client API: {e}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
-    
 
-if __name__ == "__main__":
+
+@mcp.tool()
+async def hydrus_send(client_name: str = "", link: str = "", service_names_to_additional_tags: Optional[str] = None, subdir: bool = False, max_depth: int = 2, filename: bool = True, destination_page_name: str = "hydrus_mcp") -> str:
+    """Send a link to be downloaded to Hydrus. Can send a direct file link or a base URL for recursive scraping.
+
+    Args:
+        client_name (str): Name of the Hydrus client
+        link (str): Direct link to file or base link for scraping
+        service_names_to_additional_tags (Optional[str]): Optional JSON string mapping service names to tag lists, e.g., '{"local": ["tag1", "tag2"]}'
+        subdir (bool): If True, recursively scrape subdirectories from base link (default: False)
+        max_depth (int): Maximum depth for recursive scraping (default: 2)
+        filename (bool): If True, extract filename and add as "filename:" tag (default: True)
+        destination_page_name (str): Name of the destination page in Hydrus (default: "hydrus_mcp")
+
+    Returns:
+        str: Message indicating success with file count or error message
+    """
+    if not client_name.strip():
+        return "❌ Error: Client name is required"
+    if not link.strip():
+        return "❌ Error: Link is required"
+
+    # Get the specified client
+    client_obj = get_client_by_name(client_name)
+    if not client_obj:
+        available_clients = [c['name'] for c in load_clients_from_secret()]
+        return f"❌ Error: Could not connect to client '{client_name}'. Available clients: {', '.join(available_clients)}"
+
+    try:
+        # Parse service_names_to_additional_tags if provided
+        service_keys_to_additional_tags = None
+        if service_names_to_additional_tags:
+            try:
+                tags_dict = json.loads(service_names_to_additional_tags)
+                service_keys_to_additional_tags = {}
+                for service_name, tags_list in tags_dict.items():
+                    service_key = get_service_key_by_name(client_obj, service_name)
+                    if service_key:
+                        service_keys_to_additional_tags[service_key] = tags_list
+                    else:
+                        logger.warning(f"Service '{service_name}' not found, skipping")
+            except json.JSONDecodeError as e:
+                return f"❌ Error: Invalid JSON for service_names_to_additional_tags: {str(e)}"
+
+        if subdir:
+            # Ensure link ends with / for directory scraping
+            if not link.endswith('/'):
+                link = link + '/'
+                logger.info(f"Added trailing slash to link: {link}")
+
+            # Recursive scraping mode
+            import requests
+            from bs4 import BeautifulSoup
+            from urllib.parse import urljoin, urlparse
+            import os
+            from urllib.parse import unquote
+
+            def is_valid_url(url):
+                parsed = urlparse(url)
+                return bool(parsed.netloc) and bool(parsed.scheme)
+
+            def is_subpath(base_url, target_url):
+                """Ensure target_url is within base_url directory structure"""
+                base = urlparse(base_url)
+                target = urlparse(target_url)
+
+                if base.scheme != target.scheme or base.netloc != target.netloc:
+                    return False
+
+                base_parts = base.path.strip('/').split('/')
+                target_parts = target.path.strip('/').split('/')
+
+                return base_parts[:len(base_parts)] == target_parts[:len(base_parts)]
+
+            def scrape_links_recursive(base_url, file_types, depth=1, current_depth=0, visited=None):
+                if visited is None:
+                    visited = set()
+
+                # Avoid revisiting URLs
+                if base_url in visited or current_depth > depth:
+                    return []
+
+                visited.add(base_url)
+
+                try:
+                    response = requests.get(base_url, verify=False)
+                except requests.RequestException as e:
+                    logger.warning(f"Request failed for {base_url}: {e}")
+                    return []
+
+                # Handle HTTP errors with specific messages
+                if response.status_code == 404:
+                    logger.error(f"404 Not Found: {base_url}")
+                    return []
+                elif response.status_code == 503:
+                    logger.error(f"503 Service Unavailable: {base_url}")
+                    return []
+                elif response.status_code == 429:
+                    logger.error(f"429 Too Many Requests: {base_url}")
+                    return []
+                elif response.status_code != 200:
+                    logger.warning(f"Failed to fetch {base_url}, status code: {response.status_code}")
+                    return []
+
+                soup = BeautifulSoup(response.text, 'html.parser')
+                links = []
+
+                for link_tag in soup.find_all('a', href=True):
+                    href = link_tag['href']
+
+                    # Ignore relative paths like '.' or '..'
+                    if href.startswith(('.', '../')):
+                        continue
+
+                    absolute_url = urljoin(base_url, href)
+
+                    # Ensure the discovered link is within the base directory structure
+                    if not is_subpath(base_url, absolute_url):
+                        continue
+
+                    if is_valid_url(absolute_url) and not any(href.endswith(file_type) for file_type in file_types):
+                        if href.endswith('/') or not urlparse(href).path:
+                            links.extend(scrape_links_recursive(absolute_url, file_types, depth, current_depth + 1, visited))
+                    elif any(href.endswith(file_type) for file_type in file_types):
+                        links.append(absolute_url)
+
+                return links
+
+            file_types_of_interest = ['.mp4', '.pdf', '.mkv', '.avi', '.mov', '.mpg', '.wmv', '.flv', '.m4v', '.mp3', '.wav', '.aac', '.flac']
+            links = scrape_links_recursive(link, file_types_of_interest, depth=max_depth)
+
+            if not links:
+                # Check if the link itself is a direct file link
+                if any(link.endswith(file_type) for file_type in file_types_of_interest):
+                    links = [link]
+                else:
+                    # Check if the base URL returned an error status code
+                    try:
+                        response = requests.get(link, verify=False)
+                        if response.status_code == 404:
+                            return f"❌ Error: 404 Not Found - The directory '{link}' does not exist"
+                        elif response.status_code == 503:
+                            return f"❌ Error: 503 Service Unavailable - The server is temporarily unable to handle the request"
+                        elif response.status_code == 429:
+                            return f"❌ Error: 429 Too Many Requests - Rate limit exceeded. Please wait before trying again"
+                        elif response.status_code != 200:
+                            return f"❌ Error: HTTP {response.status_code} - Failed to access directory '{link}'"
+                    except requests.RequestException as e:
+                        return f"❌ Error: Request failed - {str(e)}"
+                    
+                    return f"❌ Error: No files found in the directory structure and the link is not a direct file link"
+
+            added_count = 0
+            for file_link in links:
+                try:
+                    tags_to_add = {}
+                    if service_keys_to_additional_tags:
+                        tags_to_add = service_keys_to_additional_tags.copy()
+
+                    if filename:
+                        filename_without_extension, _ = os.path.splitext(unquote(file_link.split('/')[-1]))
+                        filename_tag = "filename:" + filename_without_extension.lower()
+                        # Add to local service if available
+                        local_key = get_service_key_by_name(client_obj, "local")
+                        if local_key:
+                            if local_key not in tags_to_add:
+                                tags_to_add[local_key] = []
+                            tags_to_add[local_key].append(filename_tag)
+
+                    client_obj.add_url(url=file_link, destination_page_name=destination_page_name, show_destination_page=True, service_keys_to_additional_tags=tags_to_add if tags_to_add else None)
+                    added_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to add URL {file_link}: {str(e)}")
+
+            return f"✅ Successfully sent {added_count} files from recursive scraping of '{link}' to Hydrus"
+
+        else:
+            # Single link mode
+            try:
+                tags_to_add = {}
+                if service_keys_to_additional_tags:
+                    tags_to_add = service_keys_to_additional_tags.copy()
+
+                if filename:
+                    from urllib.parse import unquote
+                    import os
+                    filename_without_extension, _ = os.path.splitext(unquote(link.split('/')[-1]))
+                    filename_tag = "filename:" + filename_without_extension.lower()
+                    # Add to local service if available
+                    local_key = get_service_key_by_name(client_obj, "local")
+                    if local_key:
+                        if local_key not in tags_to_add:
+                            tags_to_add[local_key] = []
+                        tags_to_add[local_key].append(filename_tag)
+
+                client_obj.add_url(url=link, destination_page_name=destination_page_name, show_destination_page=True, service_keys_to_additional_tags=tags_to_add if tags_to_add else None)
+                return f"✅ Successfully sent link '{link}' to Hydrus"
+
+            except Exception as e:
+                return f"❌ Error: Failed to add URL: {str(e)}"
+
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def main():
+    """Main entry point for the Hydrus MCP server"""
     logger.info("Starting Hydrus MCP server...")
 
     # Check if clients are configured
     clients = load_clients_from_secret()
     if not clients:
-        logger.warning("No Hydrus clients configured. Set HYDRUS_CLIENTS secret with client credentials.")
+        logger.warning("No Hydrus clients configured. Set HYDRUS_CLIENTS environment variable with client credentials.")
     else:
         logger.info(f"Configured clients: {', '.join([c['name'] for c in clients])}")
 
@@ -862,3 +994,7 @@ if __name__ == "__main__":
         mcp.run(transport='stdio')
     except Exception as e:
         logger.error(f"Server error: {e}", exc_info=True)
+
+
+if __name__ == "__main__":
+    main()
