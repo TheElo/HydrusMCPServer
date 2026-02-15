@@ -1,4 +1,4 @@
-# HydrusMCPServer
+# HydrusMCP
 An MCP Server for Hydrus Network. Connecting your LLM to an elaborate and very powerful media manager with sophisticated tag management and features.
 
 # Demonstration
@@ -48,7 +48,7 @@ To configure with LM Studio, use this JSON configuration:
 ```json
 {
 	"mcpServers": {
-		"hydrus-mcp-server": {
+		"hydrus-mcp": {
 			"command": "uvx",
 			"args": [
 				"hydrus-mcp"
@@ -97,8 +97,8 @@ Add this configuration to your LM Studio mcp.json file. If you don't use LM Stud
 
 ```json
 {
-	"mcpServers": {
-		"hydrus-mcp-server": {
+		"mcpServers": {
+			"hydrus-mcp": {
 			"command": "uv",
 			"args": [
 				"run",
