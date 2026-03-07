@@ -3,4 +3,4 @@
 This package provides an MCP server for Hydrus - a Python-based media organization system.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
