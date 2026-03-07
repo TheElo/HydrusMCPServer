@@ -2,22 +2,33 @@ import os
 import sys
 import logging
 import json
+import math
+import tempfile
 from datetime import datetime, timezone
 import httpx
 import hydrus_api, hydrus_api.utils
+import cv2
+import numpy as np
 from mcp.server.fastmcp import FastMCP
-from typing import Optional
+from mcp.server.fastmcp.utilities.types import Image
+from mcp.types import ImageContent
+from typing import Optional, Annotated
+from pydantic import Field
 
 # Import utility functions from the local module
 from .functions import get_tags, get_tags_summary, parse_hydrus_tags, get_client_by_name, load_clients_from_secret, get_service_key_by_name, get_page_info, find_page_by_name, extract_tabs_from_pages
 
 # Configure logging to stderr
+# Set root logger to WARNING to suppress noisy debug messages from MCP library
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     stream=sys.stderr
 )
+
+# Set our custom logger to INFO for useful application-level messages
 logger = logging.getLogger("hydrus_mcp.server")
+logger.setLevel(logging.INFO)
 
 # Initialize MCP server - NO PROMPT PARAMETER!
 mcp = FastMCP("hydrus")
@@ -54,19 +65,14 @@ async def hydrus_available_clients() -> str:
 
 
 @mcp.tool()
-async def hydrus_available_tag_services(client_name: str = "") -> str:
+async def hydrus_available_tag_services(client_name: Annotated[str, Field(description="The name of the Hydrus client. Required.")] = "") -> str:
     """Get available tag services for a specific Hydrus client.
 
     This function retrieves the list of tag services configured in a specified Hydrus client.
     Tag services are used to organize and search tags within the client.
 
-    Args:
-        client_name (str): The name of the Hydrus client. Required.
-
-    Notes:
-        - It connects to the specified client and retrieves tag service information
-        - Use this function to discover which tag services are available for searching and filtering
-        - Tag services can be used with other functions like to narrow down searches or limit the results to a specific tag service.
+    Use this function to discover which tag services are available for searching and filtering.
+    Tag services can be used with other functions to narrow down searches or limit results to a specific tag service.
     """
     if not client_name.strip():
         return "❌ Error: Client name is required"
@@ -95,15 +101,13 @@ async def hydrus_available_tag_services(client_name: str = "") -> str:
 
 
 @mcp.tool()
-async def hydrus_search_tags(client_name: str = "", search: str = "", tag_service: str = "all known tags", limit: str = "150") -> str:
-    """Search for tags in Hydrus using keywords and wildcards.
-
-    Args:
-        client_name (str): Name of the Hydrus client
-        search (str): Search query string
-        tag_service (str): Tag service name (default: "all known tags")
-        limit (str): Number of tags to be returned from the results by count from the top. (default: "150") 
-    """
+async def hydrus_search_tags(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    search: Annotated[str, Field(description="Search query string")] = "",
+    tag_service: Annotated[str, Field(description="Tag service name (default: 'all known tags')")] = "all known tags",
+    limit: Annotated[str, Field(description="Number of tags to be returned from the results by count from the top. (default: '150')")] = "150"
+) -> str:
+    """Search for tags in Hydrus using keywords and wildcards."""
     if not client_name.strip():
         return "❌ Error: Client name is required"
     if not search.strip():
@@ -134,8 +138,11 @@ async def hydrus_search_tags(client_name: str = "", search: str = "", tag_servic
         if not tags_list:
             return "❌ Error: No tags found matching your search criteria"
 
-        # Convert trs to integer with default of 100
-        trs_int = int(limit)
+        # Convert limit to integer - handle both string and numeric formats
+        try:
+            trs_int = int(limit) if limit.strip().isdigit() else 150
+        except (ValueError, AttributeError):
+            trs_int = 150
 
         # Check if we need to limit the results based on limit
         total_tags = len(tags_list)
@@ -162,29 +169,21 @@ async def hydrus_search_tags(client_name: str = "", search: str = "", tag_servic
 
 
 @mcp.tool()
-async def hydrus_query(client_name: str = "", query: str = "", tag_service: str = "all known tags", file_sort_type: str = "13", trs: str = "100"):
+async def hydrus_query(
+    client_name: Annotated[str, Field(description="The name of the Hydrus client to query. Required.")] = "",
+    query: Annotated[str, Field(description="The search query string containing tags to search for. Supports Hydrus tag syntax with wildcards and complex tags. Required.")] = "",
+    tag_service: Annotated[str, Field(description="The tag service to use for the search. Default is 'all known tags'. You can specify a specific tag service name if needed.")] = "all known tags",
+    file_sort_type: Annotated[str, Field(description="Sorting method for files. Default is '13' (sorted by 'has audio' as this is the fastest search). Other values may be supported depending on the Hydrus client version.")] = "13",
+    trs: Annotated[str, Field(description="Threshold for returning results. Default is '100'. If the number of matching files exceeds this threshold, only a subset will be returned with information about the total count.")] = "100"
+):
     """Query files in the Hydrus client using various search criteria.
 
     This function allows you to search for files in a Hydrus client based on tags and other parameters.
     It returns file IDs that match the search criteria, which can be used for further operations.
 
-    Args:
-        client_name (str): The name of the Hydrus client to query. Required.
-        query (str): The search query string containing tags to search for.
-                     Supports Hydrus tag syntax with wildcards and complex tags.
-                     Required.
-        tag_service (str): The tag service to use for the search. Default is "all known tags".
-                           You can specify a specific tag service name if needed.
-        file_sort_type (str): Sorting method for files. Default is "13" (sorted by "has audio" as this is the fastest search).
-                               Other values may be supported depending on the Hydrus client version.
-        trs (str): Threshold for returning results. Default is "100".
-                   If the number of matching files exceeds this threshold,
-                   only a subset will be returned with information about the total count.
-
-    Notes:
-        - The query parameter should use Hydrus tag syntax (e.g., "character:samus aran", "system:inbox", "system:limit is 100")
-        - For large result sets, consider adjusting the trs parameter to control performance
-        - File IDs returned can be used with other Hydrus functions for further operations
+    The query parameter should use Hydrus tag syntax (e.g., "character:samus aran", "system:inbox", "system:limit is 100").
+    For large result sets, consider adjusting the trs parameter to control performance.
+    File IDs returned can be used with other Hydrus functions for further operations.
     """
     if not client_name.strip():
         return json.dumps({"error": "Client name is required"})
@@ -235,9 +234,9 @@ async def hydrus_query(client_name: str = "", query: str = "", tag_service: str 
             return json.dumps(file_ids)
 
         if int(trs) < count:
-            # file_ids = file_ids["file_ids"][:10] #v
-            file_ids = file_ids[:10]
-            return f"Found {count} files, more than the threshold of {trs}, here are 10 the first 10 file ids from the results: {file_ids}"
+            # Return first trs file IDs when count exceeds threshold
+            file_ids = file_ids[:trs_int]
+            return f"Found {count} files, more than the threshold of {trs}, here are the first {trs_int} file ids from the results: {file_ids}"
 
         if len(file_ids) == 0:
             response = {"error": f"No files found for the query '{query}' on the client '{client_name}' in the tag service '{tag_service}'. Ensure that your query is correctly formatted, the tags exist on that tag service in that client or that there are actually existing files with that tag combination"}
@@ -255,20 +254,18 @@ async def hydrus_query(client_name: str = "", query: str = "", tag_service: str 
 
 
 @mcp.tool()
-async def hydrus_get_tags(client_name: str = "", content: str = "", content_type: str = "query", tag_service: str = "all known tags", trs: str = "50", limit: str = "1000", result_limit: str = "150") -> str:
+async def hydrus_get_tags(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    content: Annotated[str, Field(description="Content to process - query string, comma-separated file IDs, or page key")] = "",
+    content_type: Annotated[str, Field(description="Type of content - 'file_ids', 'query', or 'page_key' (default: 'query')")] = "query",
+    tag_service: Annotated[str, Field(description="Tag service name (default: 'all known tags')")] = "all known tags",
+    trs: Annotated[str, Field(description="Threshold for summary view. If the threshold is lower than the received file ids (either directly or from query) then the summary view is used which only returns tags and their counts from the results instead (default: '100')")] = "50",
+    limit: Annotated[str, Field(description="Limits the results to x files. Default 1000. Override if you need more or less results.")] = "1000",
+    result_limit: Annotated[str, Field(description="Limits the number of top tags shown in summary view. Default 150.")] = "150"
+) -> str:
     """Get tags for files in Hydrus client.
 
-    Args:
-        client_name (str): Name of the Hydrus client
-        content (str): Content to process - query string, comma-separated file IDs, or page key
-        content_type (str): Type of content - "file_ids", "query", or "page_key" (default: "query")
-        tag_service (str): Tag service name (default: "all known tags")
-        trs (str): Threshold for summary view, if the treshold is lower than the received file ids (eiher directly or from query) then the summary view is used which only returns tags and their counts from the results instead (default: "100")
-        limit (str): limits the results to x files. Default 1000. Override if you need more or less results.
-        result_limit (str): limits the number of top tags shown in summary view. Default 150.
-
-    Returns:
-        str: Formatted result with tags
+    Returns formatted result with tags.
     """
     if not client_name.strip():
         return "❌ Error: Client name is required"
@@ -417,8 +414,14 @@ async def hydrus_get_tags(client_name: str = "", content: str = "", content_type
 
 
 @mcp.tool()
-async def hydrus_get_file_metadata(client_name: str = "", file_id: str = "") -> str:
-    """Get metadata for a file by it's ID from a specific client. Warning: This function returns a lot of data and therefore should be only used when something has not enough tags or a deep inspection of the metadata is necessary. The file_id is expected to be in quotes for this function to work properly."""
+async def hydrus_get_file_metadata(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    file_id: Annotated[str, Field(description="File ID to get metadata for. The file_id is expected to be in quotes for this function to work properly.")] = ""
+) -> str:
+    """Get metadata for a file by its ID from a specific client.
+
+    Warning: This function returns a lot of data and therefore should be only used when something has not enough tags or a deep inspection of the metadata is necessary.
+    """
     if not client_name.strip():
         return "❌ Error: Client name is required"
     if not file_id.strip():
@@ -456,15 +459,13 @@ async def hydrus_get_file_metadata(client_name: str = "", file_id: str = "") -> 
 
 
 @mcp.tool()
-async def hydrus_get_page_info(client_name: str = "", page_key: str = "") -> str:
+async def hydrus_get_page_info(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    page_key: Annotated[str, Field(description="The page key to get information for")] = ""
+) -> str:
     """Get page information for a specific tab using its page key.
 
-    Args:
-        client_name (str): Name of the Hydrus client
-        page_key (str): The page key to get information for
-
-    Returns:
-        str: Formatted result with page information or error message
+    Returns formatted result with page information or error message.
     """
     if not client_name.strip():
         return "❌ Error: Client name is required"
@@ -499,13 +500,11 @@ async def hydrus_get_page_info(client_name: str = "", page_key: str = "") -> str
 
 
 @mcp.tool()
-async def hydrus_list_tabs(client_name: str = "", return_tab_keys: bool = False) -> str:
-    """List open tabs in a Hydrus client. Optionally returns tab keys along with names.
-
-    Args:
-        client_name (str): Name of the Hydrus client
-        return_tab_keys (bool): If True, includes page keys in the output (default: False)
-    """
+async def hydrus_list_tabs(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    return_tab_keys: Annotated[bool, Field(description="If True, includes page keys in the output (default: False)")] = False
+) -> str:
+    """List open tabs in a Hydrus client. Optionally returns tab keys along with names."""
     if not client_name.strip():
         return "❌ Error: Client name is required"
 
@@ -568,7 +567,10 @@ async def hydrus_list_tabs(client_name: str = "", return_tab_keys: bool = False)
 
 
 @mcp.tool()
-async def hydrus_focus_on_tab(client_name: str = "", tab_name: str = "") -> str:
+async def hydrus_focus_on_tab(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    tab_name: Annotated[str, Field(description="Name of the tab to focus on")] = ""
+) -> str:
     """Focus the Hydrus client on a specific tab."""
     if not client_name.strip():
         return "❌ Error: Client name is required"
@@ -638,18 +640,19 @@ async def hydrus_focus_on_tab(client_name: str = "", tab_name: str = "") -> str:
 
 
 @mcp.tool()
-async def hydrus_send_to_tab(client_name: str = "", tab_name: str = "", content: str = "", is_query: bool = False, tag_service: str = "all known tags") -> str:
-    """Send files to a specific tab in Hydrus client. When sending file ids to a tab, you set is_query to "False" or just leave it out, you also don't need to provide a tag service for file ids, the formatting for the file ids a is comma separated list of integers without the use of brackets. When providing a query, then also pass at least the is_query = "True" parameter. 
+async def hydrus_send_to_tab(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    tab_name: Annotated[str, Field(description="Name of the tab to send files to")] = "",
+    content: Annotated[str, Field(description="Either a query string (use brackets for OR type queries) or comma-separated file IDs (do not use brackets when providing file ids)")] = "",
+    is_query: Annotated[str, Field(description="True if content is a query (using tags, strings, filenames, etc.), False if it's numeric file IDs only (default: False)")] = "false",
+    tag_service: Annotated[str, Field(description="When using queries, you can provide a specific tag service name (default: 'all known tags')")] = "all known tags"
+) -> str:
+    """Send files to a specific tab in Hydrus client.
 
-    Args:
-        client_name (str): Name of the Hydrus client
-        tab_name (str): Name of the tab to send files to
-        content (str): Either a query string or comma-separated file IDs (do not use brackets when prviding file ids)
-        is_query (bool): True if content is a query, False if it's file IDs (default: False)
-        tag_service (str): Tag service name (default: "all known tags")
+    When sending file ids to a tab, set is_query to False or leave it out. You don't need to provide a tag service for file ids. The formatting for file ids is a comma separated list of integers without the use of brackets.
+    When providing a query, pass at least the is_query=True parameter.
 
-    Returns:
-        str: Message indicating success and number of files sent
+    Returns message indicating success and number of files sent.
     """
     if not client_name.strip():
         return "❌ Error: Client name is required"
@@ -657,6 +660,14 @@ async def hydrus_send_to_tab(client_name: str = "", tab_name: str = "", content:
         return "❌ Error: Tab name is required"
     if not content.strip():
         return "❌ Error: Content is required (either query or file IDs)"
+
+    # Convert is_query to boolean - handle both string and boolean formats
+    if isinstance(is_query, bool):
+        is_query_bool = is_query
+    elif isinstance(is_query, str):
+        is_query_bool = is_query.lower().strip() == "true"
+    else:
+        is_query_bool = bool(is_query)
 
     # Get the specified client
     client_obj = get_client_by_name(client_name)
@@ -766,8 +777,8 @@ async def hydrus_send_to_tab(client_name: str = "", tab_name: str = "", content:
         try:
             client_obj.add_files_to_page(page_key=page_key, file_ids=file_ids)
             return f"✅ Successfully sent {result_count} files to tab '{tab_name}'"
-        except:
-            return f"❌ Error: {str(Exception)}"
+        except Exception as e:
+            return f"❌ Error: {str(e)}"
 
     except AttributeError as e:
         return f"❌ Error: Method not found in client API: {e}"
@@ -776,20 +787,18 @@ async def hydrus_send_to_tab(client_name: str = "", tab_name: str = "", content:
 
 
 @mcp.tool()
-async def hydrus_send(client_name: str = "", link: str = "", service_names_to_additional_tags: Optional[str] = None, subdir: bool = False, max_depth: int = 2, filename: bool = True, destination_page_name: str = "hydrus_mcp") -> str:
+async def hydrus_send(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    link: Annotated[str, Field(description="Direct link to file or base link for scraping")] = "",
+    service_names_to_additional_tags: Annotated[Optional[str], Field(description="Optional JSON string mapping service names to tag lists, e.g., '{\"local\": [\"tag1\", \"tag2\"]}'")] = None,
+    subdir: Annotated[bool, Field(description="If True, recursively scrape subdirectories from base link (default: False)")] = False,
+    max_depth: Annotated[int, Field(description="Maximum depth for recursive scraping (default: 2)")] = 2,
+    filename: Annotated[bool, Field(description="If True, extract filename and add as 'filename:' tag (default: True)")] = True,
+    destination_page_name: Annotated[str, Field(description="Name of the destination page in Hydrus (default: 'hydrus_mcp')")] = "hydrus_mcp"
+) -> str:
     """Send a link to be downloaded to Hydrus. Can send a direct file link or a base URL for recursive scraping.
 
-    Args:
-        client_name (str): Name of the Hydrus client
-        link (str): Direct link to file or base link for scraping
-        service_names_to_additional_tags (Optional[str]): Optional JSON string mapping service names to tag lists, e.g., '{"local": ["tag1", "tag2"]}'
-        subdir (bool): If True, recursively scrape subdirectories from base link (default: False)
-        max_depth (int): Maximum depth for recursive scraping (default: 2)
-        filename (bool): If True, extract filename and add as "filename:" tag (default: True)
-        destination_page_name (str): Name of the destination page in Hydrus (default: "hydrus_mcp")
-
-    Returns:
-        str: Message indicating success with file count or error message
+    Returns message indicating success with file count or error message.
     """
     if not client_name.strip():
         return "❌ Error: Client name is required"
@@ -976,6 +985,661 @@ async def hydrus_send(client_name: str = "", link: str = "", service_names_to_ad
                 return f"❌ Error: Failed to add URL: {str(e)}"
 
     except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+@mcp.tool()
+async def hydrus_add_tags(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    file_ids: Annotated[int, Field(description="File ID or comma-separated file IDs to add tags to (e.g., 123 or 123,456,789)")] = 0,
+    target_tag_service: Annotated[str, Field(description="Name of the tag service to add tags to")] = "",
+    tags: Annotated[str, Field(description="Comma-separated list of tags to add (e.g., 'character:alice,rating:safe')")] = ""
+) -> str:
+    """Add tags to files in Hydrus client.
+    
+    This tool is only available if explicitly enabled in the MCP configuration.
+    The client and tag service must be whitelisted in the configuration for this tool to work.
+    """
+    # Check if the tool is enabled via environment variable
+    add_tags_enabled = os.getenv("HYDRUS_ADD_TAGS_ENABLED", "").lower() == "true"
+    if not add_tags_enabled:
+        return "❌ Error: The add_tags tool is disabled. Please enable it in your MCP configuration by setting HYDRUS_ADD_TAGS_ENABLED=true and configuring the whitelist."
+    
+    # Get whitelist configuration
+    whitelist_config = os.getenv("HYDRUS_ADD_TAGS_WHITELIST", "")
+    if not whitelist_config:
+        return "❌ Error: The add_tags tool is not configured. Please set HYDRUS_ADD_TAGS_WHITELIST in your MCP configuration with allowed clients and their tag services."
+    
+    if not client_name.strip():
+        return "❌ Error: Client name is required"
+    if file_ids == 0 or (isinstance(file_ids, str) and not file_ids.strip()):
+        return "❌ Error: File IDs are required"
+    if not target_tag_service.strip():
+        return "❌ Error: Target tag service is required"
+    if not tags.strip():
+        return "❌ Error: Tags are required (comma-separated list)"
+    
+    # Parse whitelist configuration
+    # Expected format: "client1:service1,service2|client2:service3,service4"
+    try:
+        whitelist = {}
+        for client_entry in whitelist_config.split("|"):
+            if ":" not in client_entry:
+                continue
+            client, services = client_entry.split(":", 1)
+            whitelist[client.strip()] = [s.strip() for s in services.split(",")]
+    except Exception as e:
+        return f"❌ Error: Invalid whitelist configuration format: {str(e)}"
+    
+    # Check if client is whitelisted
+    if client_name not in whitelist:
+        available_clients = list(whitelist.keys())
+        return f"❌ Error: Client '{client_name}' is not whitelisted for tag addition. Allowed clients: {', '.join(available_clients)}"
+    
+    # Check if tag service is whitelisted for this client
+    allowed_services = whitelist[client_name]
+    if target_tag_service not in allowed_services:
+        return f"❌ Error: Tag service '{target_tag_service}' is not whitelisted for client '{client_name}'. Allowed services for this client: {', '.join(allowed_services)}"
+    
+    # Get the specified client
+    client_obj = get_client_by_name(client_name)
+    if not client_obj:
+        available_clients = [c['name'] for c in load_clients_from_secret()]
+        return f"❌ Error: Could not connect to client '{client_name}'. Available clients: {', '.join(available_clients)}"
+    
+    try:
+        # Parse file IDs - handle both int and str types
+        if isinstance(file_ids, int):
+            file_ids_list = [file_ids]
+        else:
+            # Handle string input (comma-separated or single)
+            file_ids_list = []
+            for fid in file_ids.split(","):
+                fid = fid.strip().strip('"').strip("'")
+                if fid.isdigit():
+                    file_ids_list.append(int(fid))
+        if not file_ids_list:
+            return "❌ Error: No valid file IDs provided"
+        
+        # Parse tags
+        tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+        if not tags_list:
+            return "❌ Error: No valid tags provided"
+        
+        # Get service key for the target tag service
+        service_key = get_service_key_by_name(client_obj, target_tag_service)
+        if not service_key:
+            return f"❌ Error: Tag service '{target_tag_service}' not found on client '{client_name}'"
+        
+        # Add tags to files
+        client_obj.add_tags(file_ids=file_ids_list, service_keys_to_tags={str(service_key): tags_list})
+        
+        return f"✅ The following {len(tags_list)} tags were added to the tag service '{target_tag_service}' on client '{client_name}' to the file ids {file_ids_list}"
+    
+    except ValueError as e:
+        return f"❌ Error: Invalid parameter format - {str(e)}"
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+@mcp.tool()
+async def hydrus_show_file(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    file_id: Annotated[int, Field(description="File ID to show the image or video for")] = 0,
+    frame_count: Annotated[Optional[int], Field(description="If the file is a video, then this number of frames will be extracted and compiled into a grid image. Default 4 (2x2 grid). Supports 4 (2x2), 6 (3x2), 9 (3x3), 12 (4x3), etc.")] = 4
+) -> Image:
+    """Show an image or video file from Hydrus.
+    
+    Returns the actual image file for visual display.
+    For images (PNG, JPEG, GIF), returns the image directly.
+    For videos (MP4, WebM, AVI), extracts frames and compiles them into a single grid image.
+    
+    The frame_count parameter determines the grid layout for videos:
+    - 4 frames = 2x2 grid
+    - 6 frames = 3x2 grid (3 columns, 2 rows)
+    - 9 frames = 3x3 grid
+    - 12 frames = 4x3 grid (4 columns, 3 rows)
+    """
+    if not client_name.strip():
+        return Image(data=b"", format="png")
+    if file_id == 0:
+        return Image(data=b"", format="png")
+    
+    # Get the specified client
+    client_obj = get_client_by_name(client_name)
+    if not client_obj:
+        available_clients = [c['name'] for c in load_clients_from_secret()]
+        return Image(data=b"", format="png")
+    
+    try:
+        # Get the file using the Hydrus API
+        file_data = client_obj.get_file(file_id=file_id)
+        
+        # Get the content as bytes
+        file_bytes = file_data.content
+        
+        # Detect format from content
+        is_video = False
+        if file_bytes.startswith(b'\xff\xd8\xff'):
+            return Image(data=file_bytes, format="jpeg")
+        elif file_bytes.startswith(b'GIF87a') or file_bytes.startswith(b'GIF89a'):
+            return Image(data=file_bytes, format="gif")
+        elif file_bytes.startswith(b'\x89PNG'):
+            return Image(data=file_bytes, format="png")
+        elif b'ftypmp42' in file_bytes[:64] or b'ftypisom' in file_bytes[:64] or b'ftypmp41' in file_bytes[:64]:
+            is_video = True
+        elif file_bytes.startswith(b'\x1a\x45\xdf\xa3'):
+            is_video = True
+        elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'WEBV':
+            is_video = True
+        elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'AVI ':
+            is_video = True
+        
+        if not is_video:
+            # Unknown format, return as PNG
+            return Image(data=file_bytes, format="png")
+        
+        # Handle video - extract frames and compile into grid image
+        frame_count_int = frame_count if frame_count is not None else 4
+        
+        # Calculate grid dimensions (columns x rows)
+        # Try to make it as square as possible, preferring more columns
+        rows = int(math.ceil(math.sqrt(frame_count_int)))
+        cols = int(math.ceil(frame_count_int / rows))
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+            temp_video.write(file_bytes)
+            temp_video_path = temp_video.name
+        
+        try:
+            cap = cv2.VideoCapture(temp_video_path)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            duration_seconds = total_frames / fps if fps > 0 else 0
+            
+            # Get frame dimensions
+            frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            
+            if total_frames == 0:
+                cap.release()
+                os.remove(temp_video_path)
+                return Image(data=b"", format="png")
+            
+            # Calculate frame indices (equally spaced across video)
+            frame_indices = []
+            for i in range(frame_count_int):
+                percentage = (i + 1) / (frame_count_int + 1)
+                frame_indices.append(int(total_frames * percentage))
+            
+            # Extract frames
+            frames = []
+            for frame_idx in frame_indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                if ret:
+                    frames.append(frame)
+            
+            cap.release()
+            
+            if not frames:
+                os.remove(temp_video_path)
+                return Image(data=b"", format="png")
+            
+            # Create composite image grid
+            # Calculate the composite dimensions
+            composite_width = cols * frame_width
+            composite_height = rows * frame_height
+            
+            # Define maximum resolution threshold (pixels on the longest side)
+            MAX_RESOLUTION = 2000
+            
+            # Check if scaling is needed
+            if composite_width > MAX_RESOLUTION or composite_height > MAX_RESOLUTION:
+                # Calculate scaling factor to fit within MAX_RESOLUTION
+                scale_factor = MAX_RESOLUTION / max(composite_width, composite_height)
+                target_width = int(frame_width * scale_factor)
+                target_height = int(frame_height * scale_factor)
+                logger.info(f"Scaling video frames from {frame_width}x{frame_height} to {target_width}x{target_height} to fit within {MAX_RESOLUTION}px")
+            else:
+                target_width = frame_width
+                target_height = frame_height
+            
+            resized_frames = []
+            for frame in frames:
+                resized = cv2.resize(frame, (target_width, target_height))
+                resized_frames.append(resized)
+            
+            # Pad with empty frames if we have fewer frames than requested
+            while len(resized_frames) < frame_count_int:
+                empty_frame = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+                resized_frames.append(empty_frame)
+            
+            # Create the grid
+            composite_width = cols * target_width
+            composite_height = rows * target_height
+            composite = np.zeros((composite_height, composite_width, 3), dtype=np.uint8)
+            
+            for idx, frame in enumerate(resized_frames):
+                row = idx // cols
+                col = idx % cols
+                y_start = row * target_height
+                x_start = col * target_width
+                composite[y_start:y_start+target_height, x_start:x_start+target_width] = frame
+            
+            # Encode composite as PNG
+            _, buffer = cv2.imencode('.png', composite)
+            os.remove(temp_video_path)
+            
+            return Image(data=buffer.tobytes(), format="png")
+            
+        except Exception as e:
+            logger.error(f"Error processing video: {str(e)}")
+            os.remove(temp_video_path)
+            return Image(data=b"", format="png")
+    
+    except Exception as e:
+        logger.error(f"Error showing file: {str(e)}")
+        return Image(data=b"", format="png")
+
+
+@mcp.tool()
+async def hydrus_inspect_file(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    file_id: Annotated[int, Field(description="File ID of the file (image or video) to inspect")] = 0,
+    prompt: Annotated[str, Field(description="The prompt/question to ask about the file")] = "",
+    frame_count: Annotated[Optional[int], Field(description="If file is video: Number of frames to extract from video file (default: 5)")] = 5
+) -> str:
+    """Send a file (image or video) from Hydrus to a vision API for description/analysis.
+    
+    This tool retrieves a file from Hydrus and sends it to an OpenAI-compatible
+    vision API endpoint along with a prompt. The API analyzes the file and returns
+    a text description or answer to the prompt.
+    
+    Supports both images (PNG, JPEG, GIF) and videos (MP4, WebM, etc.).
+    For videos, frames are extracted and sent as images since the vision API may not support video directly.
+    
+    Configuration (from environment variables):
+    - VISION_API_URL: API endpoint URL (default: http://localhost:11434/v1/chat/completions)
+    - VISION_API_KEY: API key for authentication (default: empty)
+    - VISION_MODEL: Model name to use (default: llava)
+    """
+    import base64
+    import tempfile
+
+    # Configuration from environment variables
+    API_URL = os.getenv("VISION_API_URL")
+    API_KEY = os.getenv("VISION_API_KEY", "")
+    MODEL = os.getenv("VISION_MODEL")
+
+    if not client_name.strip():
+        return "❌ Error: Client name is required"
+    if file_id == 0:
+        return "❌ Error: File ID is required"
+    if not prompt.strip():
+        return "❌ Error: Prompt is required"
+    
+    # Get the specified client
+    client_obj = get_client_by_name(client_name)
+    if not client_obj:
+        available_clients = [c['name'] for c in load_clients_from_secret()]
+        return f"❌ Error: Could not connect to client '{client_name}'. Available clients: {', '.join(available_clients)}"
+    
+    try:
+        # Get the file using the Hydrus API
+        file_data = client_obj.get_file(file_id=file_id)
+        file_bytes = file_data.content
+        
+        # Detect mime type from content - supports images and videos
+        is_video = False
+        mime = "image/png"
+        if file_bytes.startswith(b'\xff\xd8\xff'):
+            mime = "image/jpeg"
+        elif file_bytes.startswith(b'GIF87a') or file_bytes.startswith(b'GIF89a'):
+            mime = "image/gif"
+        elif file_bytes.startswith(b'\x89PNG'):
+            mime = "image/png"
+        elif b'ftypmp42' in file_bytes[:64] or b'ftypisom' in file_bytes[:64] or b'ftypmp41' in file_bytes[:64]:
+            mime = "video/mp4"
+            is_video = True
+        elif file_bytes.startswith(b'\x1a\x45\xdf\xa3'):
+            mime = "video/webm"
+            is_video = True
+        elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'WEBV':
+            mime = "video/webm"
+            is_video = True
+        elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'AVI':
+            mime = "video/x-msvideo"
+            is_video = True
+        
+        # Encode file as base64
+        b64_data = base64.b64encode(file_bytes).decode('utf-8')
+        
+        # Prepare the API request
+        headers = {
+            "Content-Type": "application/json"
+        }
+        if API_KEY:
+            headers["Authorization"] = f"Bearer {API_KEY}"
+        
+        # Build content array based on file type
+        # Text first, then images (more stable for vision models)
+        content_items: list[dict[str, str | dict[str, str]]] = [
+            {"type": "text", "text": prompt}
+        ]
+        
+        if is_video:
+            # Extract multiple frames and send them as images
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+                temp_video.write(file_bytes)
+                temp_video_path = temp_video.name
+
+            try:
+                cap = cv2.VideoCapture(temp_video_path)
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                duration_seconds = total_frames / fps if fps > 0 else 0
+                
+                if total_frames > 0:
+                    # Calculate frame indices based on frame_count parameter
+                    # Distribute frames evenly across the video (equally spaced from center)
+                    # 1 frame = 50%, 2 frames = 33%/66%, 3 frames = 25%/50%/75%, etc.
+                    frame_count_int = frame_count if frame_count is not None else 5
+                    frame_indices = []
+                    for i in range(frame_count_int):
+                        # Equally spaced: divide video into frame_count+1 segments, take frames at segment boundaries
+                        percentage = (i + 1) / (frame_count_int + 1)
+                        frame_indices.append(int(total_frames * percentage))
+                    
+                    frames_extracted = 0
+                    timestamps = []
+                    for frame_idx in frame_indices:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                        ret, frame = cap.read()
+                        if ret:
+                            # Calculate timestamp for this frame
+                            frame_timestamp = frame_idx / fps if fps > 0 else 0
+                            timestamps.append(f"{frame_timestamp:.1f}s")
+                            
+                            # Encode frame as JPEG
+                            _, buffer = cv2.imencode('.jpg', frame)
+                            frame_b64 = base64.b64encode(buffer).decode('utf-8')
+                            # Use image_url format for OpenAI-compatible APIs (Ollama, etc.)
+                            content_items.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{frame_b64}"
+                                }
+                            })
+                            frames_extracted += 1
+                        else:
+                            logger.warning(f"Failed to extract frame at index {frame_idx}")
+                    
+                    cap.release()
+                    
+                    # Append video metadata to the prompt including timestamps
+                    duration_formatted = f"{duration_seconds:.1f}s" if duration_seconds > 0 else "unknown"
+                    timestamps_str = ", ".join(timestamps)
+                    prompt_with_metadata = f"{prompt} (Video file: {mime}, duration: {duration_formatted}, {frames_extracted} frames provided at timestamps: {timestamps_str})"
+                    content_items[0]["text"] = prompt_with_metadata
+                else:
+                    cap.release()
+                    os.remove(temp_video_path)
+                    return "❌ Error: Video has no frames"
+            finally:
+                os.remove(temp_video_path)
+        else:
+            # For images, use type "image_url" (OpenAI-compatible format)
+            content_items.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime};base64,{b64_data}"
+                }
+            })
+        
+        payload = {
+            "model": MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": content_items
+                }
+            ],
+            "max_tokens": 3000
+        }
+        
+        # Send request to vision API
+        async with httpx.AsyncClient() as session:
+            response = await session.post(API_URL, json=payload, headers=headers, timeout=120.0)
+            response.raise_for_status()
+            result = response.json()
+        
+        # Extract the response text
+        if "choices" in result and len(result["choices"]) > 0:
+            message = result["choices"][0].get("message", {})
+            content = message.get("content", "")
+            if content:
+                return f"✅ Vision API Response:\n\n{content}"
+            return f"✅ Vision API Response:\n\n{result['choices'][0]}"
+        
+        return f"❌ Error: Unexpected API response format: {result}"
+    
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error inspecting file: {str(e)}")
+        # Get more details about the error response
+        error_details = str(e)
+        try:
+            resp = getattr(e, 'response', None)
+            if resp is not None:
+                status = getattr(resp, 'status_code', 'unknown')
+                text = getattr(resp, 'text', '')[:200]
+                error_details = f"Status code: {status}, Response body: {text}"
+        except Exception as inner_e:
+            error_details = f"Original error: {str(e)}, Failed to get details: {str(inner_e)}"
+        return f"❌ Error: HTTP request failed - {error_details}"
+    except Exception as e:
+        logger.error(f"Error inspecting file: {str(e)}")
+        return f"❌ Error: {str(e)}"
+
+
+@mcp.tool()
+async def hydrus_transcribe_audio(
+    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
+    file_id: Annotated[int, Field(description="File ID of the audio file (mp3, wav, aac, flac) or video file with audio track to transcribe")] = 0
+) -> str:
+    """Transcribe audio from a file (mp3, wav, aac, flac) or video (mp4, webm, avi) using the Parakeet TDT speech-to-text API.
+    
+    This tool retrieves an audio file or video file from Hydrus and sends it to an OpenAI-compatible
+    speech-to-text API endpoint (like Parakeet TDT) for transcription. The API analyzes the audio
+    and returns a raw text transcription.
+    
+    Supports audio files (MP3, WAV, AAC, FLAC, M4A) and video files (MP4, WebM, AVI, MOV).
+    For video files, the audio track is automatically extracted and transcribed.
+    
+    Configuration (from environment variables):
+    - STT_API_URL: API endpoint URL (default: http://localhost:5092/v1/audio/transcriptions)
+    - STT_API_KEY: API key for authentication (default: sk-no-key-required)
+    - STT_MODEL: Model name to use (default: parakeet-tdt-0.6b-v3)
+    """
+    import tempfile
+    import subprocess
+
+    # Configuration from environment variables
+    API_URL = os.getenv("STT_API_URL", "http://localhost:5092/v1/audio/transcriptions")
+    API_KEY = os.getenv("STT_API_KEY", "sk-no-key-required")
+    MODEL = os.getenv("STT_MODEL", "parakeet-tdt-0.6b-v3")
+
+    if not client_name.strip():
+        return "❌ Error: Client name is required"
+    if file_id == 0:
+        return "❌ Error: File ID is required"
+    
+    # Get the specified client
+    client_obj = get_client_by_name(client_name)
+    if not client_obj:
+        available_clients = [c['name'] for c in load_clients_from_secret()]
+        return f"❌ Error: Could not connect to '{client_name}'. Available clients: {', '.join(available_clients)}"
+    
+    try:
+        # Get the file using the Hydrus API
+        file_data = client_obj.get_file(file_id=file_id)
+        file_bytes = file_data.content
+        
+        # Detect file type from content
+        is_video = False
+        file_extension = ".wav"  # default fallback
+        
+        if file_bytes.startswith(b'\xff\xfb') or file_bytes.startswith(b'\xff\xfa') or b'ID3' in file_bytes[:20]:
+            # MP3 file
+            file_extension = ".mp3"
+        elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'WAVE':
+            # WAV file
+            file_extension = ".wav"
+        elif file_bytes.startswith(b'ftyp') and (b'mp42' in file_bytes[:16] or b'isom' in file_bytes[:16] or b'mp41' in file_bytes[:16]):
+            # MP4 file - could be video or m4a audio
+            # Check for audio-specific indicators
+            if b'm4a' in file_bytes[:16] or b'm4b' in file_bytes[:16]:
+                file_extension = ".m4a"
+            else:
+                is_video = True
+                file_extension = ".mp4"
+        elif file_bytes.startswith(b'\x1a\x45\xdf\xa3'):
+            # WebM file
+            is_video = True
+            file_extension = ".webm"
+        elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'WEBV':
+            # WebM video
+            is_video = True
+            file_extension = ".webm"
+        elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'AVI ':
+            # AVI video
+            is_video = True
+            file_extension = ".avi"
+        elif b'fLaC' in file_bytes[:4]:
+            # FLAC file
+            file_extension = ".flac"
+        elif file_bytes.startswith(b'ADIF'):
+            # AAC/ADTS file
+            file_extension = ".aac"
+        else:
+            # Default to treating as audio if we can't determine
+            file_extension = ".wav"
+        
+        # Save file to temporary location
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+            temp_file.write(file_bytes)
+            source_file_path = temp_file.name
+        
+        audio_file_path = None
+        
+        try:
+            # If it's a video file, extract audio track using ffmpeg
+            if is_video:
+                audio_file_path = tempfile.mktemp(suffix=".wav")
+                logger.info(f"Extracting audio from video file: {source_file_path}")
+                
+                try:
+                    # Use ffmpeg to extract audio track to WAV format
+                    ffmpeg_cmd = [
+                        "ffmpeg", "-i", source_file_path,
+                        "-vn",  # No video
+                        "-acodec", "pcm_s16le",  # WAV codec
+                        "-ar", "16000",  # 16kHz sample rate (good for STT)
+                        "-ac", "1",  # Mono audio
+                        "-y",  # Overwrite output file
+                        audio_file_path
+                    ]
+                    
+                    result = subprocess.run(
+                        ffmpeg_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=300
+                    )
+                    
+                    if result.returncode != 0:
+                        logger.error(f"FFmpeg error: {result.stderr}")
+                        return f"❌ Error: Failed to extract audio from video - {result.stderr[:200]}"
+                    
+                    if not os.path.exists(audio_file_path):
+                        return "❌ Error: Audio extraction completed but output file was not created"
+                    
+                    logger.info(f"Audio extracted successfully to: {audio_file_path}")
+                    
+                except subprocess.TimeoutExpired:
+                    return "❌ Error: Audio extraction timed out (file may be too large)"
+                except FileNotFoundError:
+                    return "❌ Error: ffmpeg is not installed. Please install ffmpeg to transcribe video files."
+                
+            else:
+                # For audio files, use the source file directly
+                audio_file_path = source_file_path
+            
+            # Prepare the API request
+            headers = {
+                "Authorization": f"Bearer {API_KEY}"
+            }
+            
+            # Send request to STT API
+            # For OpenAI-compatible APIs, we need to send the file as multipart/form-data
+            async with httpx.AsyncClient() as session:
+                # Open the audio file and send it
+                with open(audio_file_path, "rb") as audio_file:
+                    files = {
+                        "file": (f"audio{os.path.splitext(audio_file_path)[1]}", audio_file.read()),
+                        "model": MODEL,
+                    }
+                    
+                    # Add response_format if supported (text is default)
+                    data = {
+                        "response_format": "text",
+                    }
+                    
+                    logger.info(f"Sending audio to STT API: {API_URL}")
+                    response = await session.post(API_URL, files=files, data=data, headers=headers, timeout=300.0)
+                    response.raise_for_status()
+                    transcription = response.text
+                
+                # Clean up the transcription (remove leading/trailing whitespace)
+                transcription = transcription.strip()
+                
+                if not transcription:
+                    return "❌ Error: Transcription returned empty result"
+                
+                file_type_desc = "video" if is_video else "audio"
+                return f"✅ Audio Transcription for {file_type_desc} file ID {file_id} (from {client_name}):\n\n{transcription}"
+        
+        finally:
+            # Clean up temporary source file
+            try:
+                if os.path.exists(source_file_path):
+                    os.remove(source_file_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary source file {source_file_path}: {str(e)}")
+            
+            # Clean up extracted audio file if it's different from source
+            if audio_file_path and audio_file_path != source_file_path:
+                try:
+                    if os.path.exists(audio_file_path):
+                        os.remove(audio_file_path)
+                except Exception as e:
+                    logger.warning(f"Failed to remove temporary audio file {audio_file_path}: {str(e)}")
+        
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error transcribing audio: {str(e)}")
+        # Get more details about the error response
+        error_details = str(e)
+        try:
+            resp = getattr(e, 'response', None)
+            if resp is not None:
+                status = getattr(resp, 'status_code', 'unknown')
+                text = getattr(resp, 'text', '')[:200]
+                error_details = f"Status code: {status}, Response body: {text}"
+        except Exception as inner_e:
+            error_details = f"Original error: {str(e)}, Failed to get details: {str(inner_e)}"
+        return f"❌ Error: HTTP request failed - {error_details}"
+    except Exception as e:
+        logger.error(f"Error transcribing audio: {str(e)}")
         return f"❌ Error: {str(e)}"
 
 
