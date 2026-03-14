@@ -16,16 +16,17 @@ The Hydrus MCP Server provides the following tools:
 3. `hydrus_search_tags(client_name, search, tag_service, limit)` - Search for tags in Hydrus using keywords and wildcards
 4. `hydrus_query(client_name, query, tag_service, file_sort_type, trs)` - Query files in the Hydrus client using various search criteria
 5. `hydrus_get_tags(client_name, content, content_type, tag_service, trs, limit, result_limit)` - Get tags for files in Hydrus client
-6. `hydrus_get_file_metadata(client_name, file_id)` - Get metadata for a file by its ID
+6. `hydrus_get_file_metadata(client_name, file_id, filter)` - Get metadata for one or more files by their IDs (supports multiple file IDs and optional field filtering)
 7. `hydrus_get_page_info(client_name, page_key)` - Get page information for a specific tab using its page key
 8. `hydrus_list_tabs(client_name, return_tab_keys)` - List open tabs in a Hydrus client
 9. `hydrus_focus_on_tab(client_name, tab_name)` - Focus the Hydrus client on a specific tab
 10. `hydrus_send_to_tab(client_name, tab_name, content, is_query, tag_service)` - Send files to a specific tab in Hydrus client
 11. `hydrus_send(client_name, link, service_names_to_additional_tags, subdir, max_depth, filename, destination_page_name)` - Send a link to be downloaded to Hydrus
 12. `hydrus_add_tags(client_name, file_ids, target_tag_service, tags)` - Add tags to files in Hydrus client (requires explicit enablement)
-13. `hydrus_show_file(client_name, file_id, frame_count)` - Show an image or video file from Hydrus
-14. `hydrus_inspect_file(client_name, file_id, prompt, frame_count)` - Send an image or video from Hydrus to a vision API for description/analysis (requires vision API configuration)
+13. `hydrus_show_files(client_name, file_ids, frame_count)` - Show multiple image or video files from Hydrus (optimized for large files using direct disk access)
+14. `hydrus_inspect_files(client_name, file_ids, prompt, frame_count)` - Send multiple images or videos from Hydrus to a vision API for description/analysis (requires vision API configuration)
 15. `hydrus_transcribe_audio(client_name, file_id)` - Transcribe audio from audio files (mp3, wav, aac, flac) or video files (mp4, webm, avi) using a speech-to-text API (requires STT API configuration)
+16. `hydrus_execute(client_name, action, kwargs)` - Execute any hydrus_api.Client method dynamically or list available methods (requires EXEC_WHITELIST configuration)
 
 # Abilities
 
@@ -274,6 +275,41 @@ Add the following environment variables to your MCP configuration to enable the 
 
 - **Audio files**: MP3, WAV, AAC, FLAC, M4A
 - **Video files**: MP4, WebM, AVI (audio track is automatically extracted)
+
+# Optional: Execute Any Hydrus API Method
+
+The `hydrus_execute` tool allows the LLM to call ANY method available on the `hydrus_api.Client` object dynamically. This provides access to all 62+ Hydrus API methods that may not have dedicated MCP tools.
+
+## Security Model
+
+This tool uses a **deny-by-default** security model:
+- By default, only `action='list'` is allowed (to list available methods)
+- All other method calls require explicit whitelisting via the `EXEC_WHITELIST` environment variable
+- This prevents accidental or malicious execution of dangerous API methods
+
+## Configuration
+
+Add the `EXEC_WHITELIST` environment variable to your MCP configuration:
+
+```json
+{
+    "mcpServers": {
+        "hydrus-mcp": {
+            "command": "uvx",
+            "args": [
+                "hydrus-mcp"
+            ],
+            "env": {
+                "HYDRUS_CLIENTS": "[[\"HE\", \"http://localhost:45869/\", \"APIKEY1\"]]",
+                "EXEC_WHITELIST": "get_api_version,get_mr_bones"
+            }
+        }
+    }
+}
+```
+
+
+**Only whitelist methods you explicitly want the LLM to use and understand the risks of. Currently the commands are whitelisted for ALL clients.**
 
 # Limitations
 

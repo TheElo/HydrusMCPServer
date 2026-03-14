@@ -1,10 +1,9 @@
-import hydrus_api, hydrus_api.utils, logging, os, json
-from typing import List, Dict
+import hydrus_api, os, json, math
+import numpy as np
+from typing import Any
 
-logger = logging.getLogger("hydrus_mcp.functions")
 
-
-def load_clients_from_secret() -> List[Dict[str, str]]:
+def load_clients_from_secret() -> list[dict[str, str]]:
     """Load client credentials from environment variable
     
     Returns:
@@ -14,10 +13,8 @@ def load_clients_from_secret() -> List[Dict[str, str]]:
     
     try:
         clients = json.loads(clients_secret)
-        logger.info(f"Loaded {len(clients)} Hydrus clients from environment variable")
-        logger.debug(f"Raw clients data: {clients_secret}")
         
-        valid_clients = []
+        valid_clients: list[dict[str, str]] = []
         for client in clients:
             if len(client) >= 3:
                 client_name = client[0]
@@ -33,9 +30,7 @@ def load_clients_from_secret() -> List[Dict[str, str]]:
                 })
         
         return valid_clients
-    except (json.JSONDecodeError, TypeError) as e:
-        logger.error(f"Failed to parse HYDRUS_CLIENTS: {e}")
-        logger.debug(f"Raw clients data that failed to parse: {repr(clients_secret)}")
+    except (json.JSONDecodeError, TypeError):
         return []
 
 
@@ -48,52 +43,53 @@ def get_client_by_name(client_name: str) -> hydrus_api.Client | None:
     Returns:
         hydrus_api.Client instance or None if not found
     """
-    clients = load_clients_from_secret()
-    for client in clients:
-        if client["name"].lower() == client_name.lower():
-            try:
-                return hydrus_api.Client(access_key=client["apikey"], api_url=client["url"])
-            except Exception as e:
-                logger.error(f"Failed to create client {client_name}: {e}")
-                return None
-    return None
-
-def get_page_info(client_obj, page_key):
-    """Get page information for a specific tab using its page key"""
-    try:
-        return client_obj.get_page_info(page_key=page_key)
-    except Exception as e:
-        logger.error(f"Failed to get page info for page_key {page_key}: {e}")
-        return None
-
-def get_service_key_by_name(client, service_name):
-    """Get the service key for a given service name"""
-    try:
-        services_dict = client.get_services()
-        for key, service_info in services_dict['services'].items():
-            if service_info['name'] == service_name:
-                return key
-        return None
-    except Exception as e:
+    if not client_name:
         return None
     
-def get_tags(client_obj, file_ids, tag_service="all known tags"):
+    # Strip quotes from client name (models often send quoted strings)
+    client_name_stripped = client_name.strip()
+    if (client_name_stripped.startswith('"') and client_name_stripped.endswith('"')) or \
+       (client_name_stripped.startswith("'") and client_name_stripped.endswith("'")):
+        client_name_stripped = client_name_stripped[1:-1]
+    
+    clients = load_clients_from_secret()
+    for client in clients:
+        if client["name"].lower() == client_name_stripped.lower():
+            return hydrus_api.Client(access_key=client["apikey"], api_url=client["url"])
+    return None
+
+
+def get_page_info(client_obj: hydrus_api.Client, page_key: str) -> dict | None:
+    """Get page information for a specific tab using its page key"""
+    return client_obj.get_page_info(page_key=page_key)
+
+
+def get_service_key_by_name(client: hydrus_api.Client, service_name: str) -> str | None:
+    """Get the service key for a given service name"""
+    services_dict = client.get_services()
+    for key, service_info in services_dict["services"].items():
+        if service_info["name"] == service_name:
+            return key
+    return None
+
+
+def get_tags(client_obj: hydrus_api.Client, file_ids: list[int], tag_service: str = "all known tags") -> list[list[Any]]:
     tag_service_key = get_service_key_by_name(client_obj, tag_service)
 
     # Process in batches of 3
     batch_size = 3
-    MyDict = []
+    MyDict: list[list[Any]] = []
 
     for i in range(0, len(file_ids), batch_size):
         # Get current batch of file IDs (up to batch_size)
-        batch_file_ids = file_ids[i:i + batch_size]
+        batch_file_ids = file_ids[i : i + batch_size]
 
         try:
             # Get metadata for this batch
             a = client_obj.get_file_metadata(file_ids=batch_file_ids)
 
             # Process each item in the batch
-            for y in range(0, len(a)):
+            for y in range(0, len(a)):  # type: ignore[arg-type]
                 try:
                     metadata = a.get("metadata")
                     tags = metadata[y]["tags"][f"{tag_service_key}"]["storage_tags"]["0"]
@@ -101,8 +97,7 @@ def get_tags(client_obj, file_ids, tag_service="all known tags"):
                     tags = [f"Error processing file: {str(e)}"]
 
                 MyDict.append([batch_file_ids[y], tags])
-        except Exception as e:
-            logger.error(f"Failed to get metadata for batch starting with {batch_file_ids[0]}: {e}")
+        except Exception:
             # Add error information to results
             for file_id in batch_file_ids:
                 if not any(existing[0] == file_id for existing in MyDict):
@@ -144,8 +139,7 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
                             tag_counts[tag] += 1
                         else:
                             tag_counts[tag] = 1
-        except Exception as e:
-            logger.error(f"Failed to get metadata for batch starting with {batch_file_ids[0]}: {e}")
+        except Exception:
             # Add error information to counts
             for file_id in batch_file_ids:
                 if not any(existing[0] == file_id for existing in tag_counts):
@@ -356,7 +350,6 @@ def find_page_by_name(pages_list: list, tab_name: str) -> dict | None:
     """
     for page_info in pages_list:
         if not isinstance(page_info, dict):
-            logger.error(f"Unexpected page_info format: {type(page_info).__name__}")
             continue
         
         name = page_info.get('name', '')
@@ -388,7 +381,6 @@ def extract_tabs_from_pages(pages_list: list, return_keys: bool = False) -> tupl
     
     for page_info in pages_list:
         if not isinstance(page_info, dict):
-            logger.error(f"Unexpected page_info format: {type(page_info).__name__}")
             continue
         
         name = page_info.get('name', page_info.get('title', f"Page {page_info.get('id', 'unknown')}"))
@@ -398,8 +390,6 @@ def extract_tabs_from_pages(pages_list: list, return_keys: bool = False) -> tupl
             page_key = page_info.get('page_key')
             if page_key:
                 tab_keys.append(page_key)
-            else:
-                logger.warning(f"No page_key found for tab: {name}")
         
         if 'pages' in page_info:
             nested_tabs, nested_keys = extract_tabs_from_pages(page_info['pages'], return_keys)
@@ -407,3 +397,566 @@ def extract_tabs_from_pages(pages_list: list, return_keys: bool = False) -> tupl
             tab_keys.extend(nested_keys)
     
     return tabs, tab_keys
+
+
+def get_file_path(client_obj, file_id: int) -> dict | None:
+    """Get the local file path for a file by its ID.
+    
+    This function retrieves the filesystem path where Hydrus stores the file locally.
+    This is useful for large files where downloading the entire content would be inefficient.
+    
+    Args:
+        client_obj: The hydrus_api.Client instance
+        file_id: The numerical file ID
+        
+    Returns:
+        Dictionary with 'path', 'filetype', and 'size' keys, or None if file not found locally
+        or if the API key doesn't have 'See Local Paths' permission.
+    """
+    import httpx
+    
+    try:
+        # Get the API URL and access key from the client object
+        # The hydrus_api.Client stores these as api_url and access_key (public attributes)
+        api_url = client_obj.api_url.rstrip('/')
+        access_key = client_obj.access_key
+        
+        headers = {
+            "Hydrus-Client-API-Access-Key": access_key
+        }
+        
+        # Make synchronous request for simplicity
+        with httpx.Client() as http_client:
+            response = http_client.get(
+                f"{api_url}/get_files/file_path?file_id={file_id}",
+                headers=headers,
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                return None
+            elif response.status_code == 403:
+                return None
+            else:
+                return None
+    except Exception:
+        return None
+
+
+def safe_int_convert(value, default: int = 0) -> int:
+    """Safely convert a value to integer, handling both string and int types.
+    
+    This function handles various input formats including:
+    - Direct integers
+    - String representations of numbers
+    - Quoted strings (e.g., '"123"' or "'123'")
+    - Invalid values (returns default)
+    
+    Args:
+        value: The value to convert (can be int, str, or None)
+        default: The default value to return if conversion fails (default: 0)
+        
+    Returns:
+        The converted integer or the default value
+    """
+    if isinstance(value, int):
+        return value
+    
+    if value is None or value == "":
+        return default
+    
+    # Convert to string and strip whitespace
+    value_str = str(value).strip()
+    
+    # Strip quotes if present (models often send quoted numbers)
+    if (value_str.startswith('"') and value_str.endswith('"')) or \
+       (value_str.startswith("'") and value_str.endswith("'")):
+        value_str = value_str[1:-1]
+    
+    # Try to convert to int
+    try:
+        return int(value_str)
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_bool_convert(value, default: bool = False) -> bool:
+    """Safely convert a value to boolean, handling both string and bool types.
+    
+    This function handles various input formats including:
+    - Direct booleans
+    - String representations ("true", "false", "True", "False", etc.)
+    - Other truthy/falsy values
+    
+    Args:
+        value: The value to convert (can be bool, str, or other)
+        default: The default value to return if conversion fails (default: False)
+        
+    Returns:
+        The converted boolean or the default value
+    """
+    if isinstance(value, bool):
+        return value
+    
+    if isinstance(value, str):
+        return value.lower().strip() == "true"
+    
+    return bool(value) if value is not None else default
+
+
+def parse_file_ids(file_ids) -> list[int]:
+    """Parse file IDs from various input formats into a list of integers.
+    
+    This function handles various input formats including:
+    - Single integer
+    - Comma-separated string of integers
+    - String with brackets (e.g., "[123, 456]")
+    - Quoted numbers
+    
+    Args:
+        file_ids: The file IDs to parse (can be int, str, or list)
+        
+    Returns:
+        List of valid file IDs as integers
+    """
+    result = []
+    
+    if isinstance(file_ids, int):
+        return [file_ids]
+    
+    if isinstance(file_ids, list):
+        for fid in file_ids:
+            if isinstance(fid, int):
+                result.append(fid)
+            elif isinstance(fid, str):
+                fid_stripped = fid.strip().strip('"').strip("'")
+                if fid_stripped.isdigit():
+                    result.append(int(fid_stripped))
+        return result
+    
+    # Handle string input
+    if isinstance(file_ids, str):
+        # Strip brackets if present
+        content = file_ids.strip()
+        if content.startswith('[') and content.endswith(']'):
+            content = content[1:-1]
+        
+        # Split by comma and convert each part
+        for fid in content.split(','):
+            fid = fid.strip().strip('"').strip("'")
+            if fid.isdigit():
+                result.append(int(fid))
+    
+    return result
+
+def validate_client(client_name: str) -> tuple[hydrus_api.Client, None] | tuple[None, str]:
+    """Validate client name and return client object or error message.
+    
+    Args:
+        client_name: Name of the Hydrus client to connect to
+        
+    Returns:
+        Tuple of (client_obj, error_message). If successful, error_message is None.
+        If failed, client_obj is None and error_message contains the error.
+    """
+    if not client_name or not client_name.strip():
+        return None, "❌ Error: Client name is required"
+    
+    client_obj = get_client_by_name(client_name)
+    if not client_obj:
+        available_clients = [c['name'] for c in load_clients_from_secret()]
+        return None, f"❌ Error: Could not connect to client '{client_name}'. Available clients: {', '.join(available_clients)}"
+    
+    return client_obj, None
+
+
+def get_page_list(client_obj) -> tuple[list | None, str | None]:
+    """Get and normalize page list from client.
+    
+    Args:
+        client_obj: Hydrus API client object
+        
+    Returns:
+        Tuple of (page_list, error_message). If successful, error_message is None.
+    """
+    try:
+        pages_response = client_obj.get_pages()
+        
+        if not isinstance(pages_response, dict) or 'pages' not in pages_response:
+            return None, f"❌ Error: Unexpected response format from get_pages(). Expected dict with 'pages' key, got {type(pages_response).__name__}. Response: {str(pages_response)[:200]}"
+        
+        page_list = pages_response['pages']
+        
+        # Handle both list and single dictionary cases
+        if isinstance(page_list, list):
+            pass
+        elif isinstance(page_list, dict):
+            page_list = [page_list]
+        else:
+            return None, f"❌ Error: Unexpected response format for 'pages' in get_pages(). Expected list or dict, got {type(page_list).__name__}. Response: {str(page_list)[:200]}"
+        
+        return page_list, None
+        
+    except AttributeError as e:
+        return None, f"❌ Error: Method not found in client API: {e}"
+    except Exception as e:
+        return None, f"❌ Error: Failed to get pages: {str(e)}"
+
+
+def detect_file_type_from_path(file_path: str) -> dict:
+    """Detect file type from file path extension.
+    
+    Args:
+        file_path: Path to the file
+        
+    Returns:
+        Dictionary with 'is_video', 'is_animated_gif', 'mime_type', and 'file_extension' keys
+    """
+    file_path_lower = file_path.lower()
+    
+    # Video extensions
+    video_extensions = {'.mp4', '.webm', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.m4v'}
+    # Audio extensions
+    audio_extensions = {'.mp3', '.wav', '.aac', '.flac', '.m4a'}
+    # Image extensions
+    image_extensions = {'.jpg', '.jpeg', '.png', '.gif'}
+    
+    # Get file extension
+    for ext in video_extensions | audio_extensions | image_extensions:
+        if file_path_lower.endswith(ext):
+            file_extension = ext
+            break
+    else:
+        file_extension = '.unknown'
+    
+    is_video = file_extension in video_extensions
+    is_animated_gif = file_extension == '.gif'
+    
+    # Determine mime type
+    mime_map = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.png': 'image/png', '.gif': 'image/gif',
+        '.mp4': 'video/mp4', '.webm': 'video/webm', '.avi': 'video/x-msvideo',
+        '.mkv': 'video/x-matroska', '.mov': 'video/quicktime', '.wmv': 'video/x-ms-wmv',
+        '.flv': 'video/x-flv', '.m4v': 'video/x-m4v',
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.aac': 'audio/aac',
+        '.flac': 'audio/flac', '.m4a': 'audio/mp4'
+    }
+    mime_type = mime_map.get(file_extension, 'application/octet-stream')
+    
+    return {
+        'is_video': is_video,
+        'is_animated_gif': is_animated_gif,
+        'mime_type': mime_type,
+        'file_extension': file_extension
+    }
+
+
+def detect_file_type_from_bytes(file_bytes: bytes) -> dict:
+    """Detect file type from file content bytes.
+    
+    Args:
+        file_bytes: Raw file content
+        
+    Returns:
+        Dictionary with 'is_video', 'is_animated_gif', 'mime_type', and 'file_extension' keys
+    """
+    is_video = False
+    is_animated_gif = False
+    mime_type = 'image/png'  # default
+    file_extension = '.png'  # default
+    
+    if file_bytes.startswith(b'\xff\xd8\xff'):
+        mime_type = 'image/jpeg'
+        file_extension = '.jpg'
+    elif file_bytes.startswith(b'GIF87a') or file_bytes.startswith(b'GIF89a'):
+        mime_type = 'image/gif'
+        file_extension = '.gif'
+        # Check if animated GIF (multiple frames)
+        if file_bytes.count(b'\x2c') > 1:
+            is_animated_gif = True
+    elif file_bytes.startswith(b'\x89PNG'):
+        mime_type = 'image/png'
+        file_extension = '.png'
+    elif b'ftypmp42' in file_bytes[:64] or b'ftypisom' in file_bytes[:64] or b'ftypmp41' in file_bytes[:64]:
+        mime_type = 'video/mp4'
+        file_extension = '.mp4'
+        is_video = True
+    elif file_bytes.startswith(b'\x1a\x45\xdf\xa3'):
+        mime_type = 'video/webm'
+        file_extension = '.webm'
+        is_video = True
+    elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'WEBV':
+        mime_type = 'video/webm'
+        file_extension = '.webm'
+        is_video = True
+    elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'AVI ':
+        mime_type = 'video/x-msvideo'
+        file_extension = '.avi'
+        is_video = True
+    elif file_bytes.startswith(b'\xff\xfb') or file_bytes.startswith(b'\xff\xfa') or b'ID3' in file_bytes[:20]:
+        mime_type = 'audio/mpeg'
+        file_extension = '.mp3'
+    elif file_bytes.startswith(b'RIFF') and file_bytes[8:12] == b'WAVE':
+        mime_type = 'audio/wav'
+        file_extension = '.wav'
+    elif b'fLaC' in file_bytes[:4]:
+        mime_type = 'audio/flac'
+        file_extension = '.flac'
+    elif file_bytes.startswith(b'ADIF'):
+        mime_type = 'audio/aac'
+        file_extension = '.aac'
+    
+    return {
+        'is_video': is_video,
+        'is_animated_gif': is_animated_gif,
+        'mime_type': mime_type,
+        'file_extension': file_extension
+    }
+
+
+def calculate_grid_dimensions(frame_count: int) -> tuple[int, int]:
+    """Calculate grid dimensions (rows, cols) for a given frame count.
+    
+    Args:
+        frame_count: Number of frames to display
+        
+    Returns:
+        Tuple of (rows, cols) for the grid layout
+    """
+    rows = int(math.ceil(math.sqrt(frame_count)))
+    cols = int(math.ceil(frame_count / rows))
+    return rows, cols
+
+
+def calculate_frame_indices(total_frames: int, frame_count: int) -> list[int]:
+    """Calculate frame indices for evenly spaced frame extraction.
+    
+    Args:
+        total_frames: Total number of frames in the video
+        frame_count: Number of frames to extract
+        
+    Returns:
+        List of frame indices to extract
+    """
+    frame_indices = []
+    for i in range(frame_count):
+        percentage = (i + 1) / (frame_count + 1)
+        frame_indices.append(int(total_frames * percentage))
+    return frame_indices
+
+
+def create_frame_grid(frames: list, frame_width: int, frame_height: int, frame_count: int) -> np.ndarray:
+    """Create a composite image grid from multiple frames.
+    
+    Args:
+        frames: List of numpy array frames
+        frame_width: Width of individual frames
+        frame_height: Height of individual frames
+        frame_count: Total number of frames (for grid calculation)
+        
+    Returns:
+        Numpy array of the composite grid image
+    """
+    rows, cols = calculate_grid_dimensions(frame_count)
+    
+    # Calculate composite dimensions
+    composite_width = cols * frame_width
+    composite_height = rows * frame_height
+    
+    # Create the grid at original resolution
+    composite = np.zeros((composite_height, composite_width, 3), dtype=np.uint8)
+    
+    for idx, frame in enumerate(frames):
+        row = idx // cols
+        col = idx % cols
+        y_start = row * frame_height
+        x_start = col * frame_width
+        composite[y_start:y_start+frame_height, x_start:x_start+frame_width] = frame
+    
+    return composite
+
+
+def scale_image_if_needed(image: np.ndarray, max_resolution: int = 1000) -> np.ndarray:
+    """Scale image down if it exceeds maximum resolution on longest side.
+    
+    Args:
+        image: Input numpy array image
+        max_resolution: Maximum allowed pixels on longest side
+        
+    Returns:
+        Scaled numpy array image
+    """
+    import cv2
+    
+    height, width = image.shape[:2]
+    
+    if width > max_resolution or height > max_resolution:
+        scale_factor = max_resolution / max(width, height)
+        new_width = int(width * scale_factor)
+        new_height = int(height * scale_factor)
+        image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    
+    return image
+
+
+def extract_frames_from_video(file_path: str, frame_count: int) -> tuple[list[np.ndarray] | None, dict]:
+    """Extract frames from a video file.
+    
+    Args:
+        file_path: Path to the video file
+        frame_count: Number of frames to extract
+        
+    Returns:
+        Tuple of (frames_list, metadata_dict). frames_list is None if extraction failed.
+        metadata_dict contains 'total_frames', 'fps', 'duration', 'frame_width', 'frame_height'
+    """
+    import cv2
+    
+    cap = cv2.VideoCapture(file_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    duration_seconds = total_frames / fps if fps > 0 else 0
+    
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    metadata = {
+        'total_frames': total_frames,
+        'fps': fps,
+        'duration': duration_seconds,
+        'frame_width': frame_width,
+        'frame_height': frame_height
+    }
+    
+    if total_frames == 0:
+        cap.release()
+        return None, metadata
+    
+    # Calculate and extract frames
+    frame_indices = calculate_frame_indices(total_frames, frame_count)
+    frames = []
+    
+    for frame_idx in frame_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if ret:
+            frames.append(frame)
+    
+    cap.release()
+    
+    if not frames:
+        return None, metadata
+    
+    return frames, metadata
+
+def get_viewing_stat(file_metadata: dict, stat_key: str, default) -> Any:
+    """Extract viewing statistics from file_metadata.
+    
+    Searches through file_viewing_statistics list and sums up the stat across all canvas types.
+    """
+    stats_list = file_metadata.get('file_viewing_statistics', [])
+    total = default
+    for stat in stats_list:
+        if isinstance(stat, dict) and stat_key in stat:
+            val = stat[stat_key]
+            if isinstance(total, int) and isinstance(val, (int, float)):
+                total += int(val)
+            elif isinstance(total, float) and isinstance(val, (int, float)):
+                total += val
+            elif stat_key == 'last_viewed_timestamp' and val is not None:
+                if total is None or val > total:
+                    total = val
+    return total
+
+
+def format_timestamp(timestamp) -> str:
+    """Format Unix timestamp to yyyy.mm.dd hh:mm:ss format.
+    
+    Hydrus API returns timestamps in seconds since Unix epoch (e.g., 1700000000 for Nov 2023).
+    Valid range for dates between 1970 and 2100 is approximately 0 to 4,102,441,200 seconds.
+    
+    Args:
+        timestamp: Unix timestamp (int or float) in seconds since epoch
+        
+    Returns:
+        Formatted date string or 'N/A' if invalid
+    """
+    if timestamp is None:
+        return "N/A"
+    try:
+        from datetime import datetime
+        
+        # Convert to numeric type
+        ts = float(timestamp)
+        
+        # Hydrus API returns timestamps in seconds since Unix epoch
+        # Valid range for reasonable dates (year 1970-2100): 0 to ~4.1 billion seconds
+        # 
+        # If timestamp is outside this range, it might be in milliseconds or microseconds
+        # - Milliseconds would be ~1.7 trillion for 2024 (e.g., 1700000000000)
+        # - Microseconds would be ~1.7 quadrillion for 2024 (e.g., 1700000000000000)
+        #
+        # Handle timestamps that are too large (milliseconds/microseconds)
+        if ts > 4102441200:  # Year 2100 in seconds
+            # Likely milliseconds or microseconds - divide by 1000
+            ts = ts / 1000.0
+            # If still > year 2100, it was microseconds - divide again
+            if ts > 4102441200:
+                ts = ts / 1000.0
+        # Handle timestamps that are too small (negative or before epoch)
+        elif ts < 0:
+            return "N/A"
+        
+        dt = datetime.fromtimestamp(ts)
+        return dt.strftime("%Y.%m.%d %H:%M:%S")
+    except (ValueError, TypeError, OSError, OverflowError):
+        return "N/A"
+
+
+def extract_tags_by_service(tags_dict: dict, service_names: list[str] = None, tag_type: str = "display_tags") -> dict[str, list[str]]:
+    """Extract tags grouped by tag service name.
+    
+    Args:
+        tags_dict: The tags dictionary from file metadata
+        service_names: Optional list of service names to filter. If None, returns all services.
+                       Can also be passed as a comma-separated string.
+        tag_type: Which tag type to extract - 'display_tags' or 'storage_tags' (default: 'display_tags')
+                       
+    Returns:
+        Dictionary mapping service names to their tag lists
+    """
+    # Handle service_names as comma-separated string
+    if isinstance(service_names, str):
+        service_names = [s.strip() for s in service_names.split(',') if s.strip()]
+    
+    # Validate tag_type
+    if tag_type not in ('display_tags', 'storage_tags'):
+        tag_type = 'display_tags'
+    
+    result = {}
+    
+    for service_key, service_data in tags_dict.items():
+        if not isinstance(service_data, dict):
+            continue
+            
+        service_name = service_data.get('name', service_key)
+        
+        # Skip if service_names filter is specified and this service is not in the list
+        if service_names and service_name not in service_names:
+            continue
+        
+        all_tags = []
+        if tag_type in service_data:
+            tag_category = service_data[tag_type]
+            if isinstance(tag_category, dict):
+                for category_key, tag_list in tag_category.items():
+                    if isinstance(tag_list, list):
+                        all_tags.extend(tag_list)
+        
+        if all_tags:
+            result[service_name] = all_tags
+    
+    return result
