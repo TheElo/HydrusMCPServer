@@ -300,7 +300,7 @@ Add the `EXEC_WHITELIST` environment variable to your MCP configuration:
                 "hydrus-mcp"
             ],
             "env": {
-                "HYDRUS_CLIENTS": "[[\"HE\", \"http://localhost:45869/\", \"APIKEY1\"]]",
+                "HYDRUS_CLIENTS": "[[\"Name1\", \"http://localhost:45869/\", \"APIKEY1\"]]",
                 "EXEC_WHITELIST": "get_api_version,get_mr_bones"
             }
         }
