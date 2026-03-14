@@ -381,13 +381,16 @@ async def hydrus_get_tags(
 @mcp.tool()
 async def hydrus_get_file_metadata(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    file_id: Annotated[Any, Field(description="File ID or comma-separated list of file IDs to get metadata for (e.g., 123 or '123,456,789'). Can be provided as a number (123) or string ('123').")] = 0,
-    filter: Annotated[Optional[str], Field(description="Optional filter to return only specific fields. Comma-separated list: 'hash', 'size', 'mime', 'dimensions', 'duration', 'views', 'viewtime', 'last_viewed', 'time_modified', 'tags'. For tags, use 'tags(service1,service2)' to filter by specific tag services. Leave empty for full metadata.")] = None
+    file_id: Annotated[Optional[Any], Field(description="File ID or comma-separated list of file IDs to get metadata for (e.g., 123 or '123,456,789'). Can be provided as a number (123) or string ('123'). Mutually exclusive with 'hashes'.")] = None,
+    hashes: Annotated[Optional[str], Field(description="Single hash or comma-separated list of file hashes (SHA256) to get metadata for. Mutually exclusive with 'file_id'. Example: 'abc123...' or 'abc123...,def456...'")] = None,
+    filter: Annotated[Optional[str], Field(description="Optional filter to return only specific fields. Comma-separated list: 'file_id', 'hash', 'size', 'mime', 'dimensions', 'duration', 'views', 'viewtime', 'last_viewed', 'time_modified', 'tags'. For tags, use 'tags(service1,service2)' to filter by specific tag services. Leave empty for full metadata.")] = None
 ) -> str:
-    """Get metadata for one or more files by their IDs from a specific client.
+    """Get metadata for one or more files by their IDs or hashes from a specific client.
 
     Warning: This function returns a lot of data and therefore should be only used when something has not enough tags or a deep inspection of the metadata is necessary.
     Use the filter parameter to reduce output size (e.g., 'hash' for just hashes, or 'hash,size,duration' for multiple fields).
+    
+    You can use either 'file_id' or 'hashes' parameter, but not both.
     """
     # Internal configuration: which tag type to use for tags filter
     TAG_TYPE_FOR_FILTER = "display_tags"  # Options: "display_tags" or "storage_tags"
@@ -396,48 +399,124 @@ async def hydrus_get_file_metadata(
     if error:
         return error
     
-    # Parse file IDs using parse_file_ids function (handles single IDs, strings, lists, etc.)
-    file_ids_list = parse_file_ids(file_id)
-    if not file_ids_list:
-        return "❌ Error: No valid file IDs provided"
+    # Check that exactly one of file_id or hashes is provided
+    has_file_id = file_id is not None and file_id != 0 and (not isinstance(file_id, str) or file_id.strip())
+    has_hashes = hashes is not None and hashes.strip()
+    
+    if not has_file_id and not has_hashes:
+        return "❌ Error: Either 'file_id' or 'hashes' parameter is required"
+    if has_file_id and has_hashes:
+        return "❌ Error: Cannot use both 'file_id' and 'hashes' parameters. Please use only one."
 
     try:
-        # Get metadata for all file IDs in a single API call
-        metadata = client_obj.get_file_metadata(file_ids=file_ids_list)
-
-        # Handle filter parameter
+        # Parse filter keys early to determine if we can use only_return_identifiers optimization
+        filter_keys = []
+        tags_services = None
+        valid_keys = {'file_id', 'hash', 'size', 'mime', 'dimensions', 'duration', 'views', 'viewtime', 'last_viewed', 'time_modified', 'tags'}
+        
         if filter:
             # Parse comma-separated filter keys
-            filter_keys = [k.strip() for k in filter.split(',')]
-            valid_keys = {'hash', 'size', 'mime', 'dimensions', 'duration', 'views', 'viewtime', 'last_viewed', 'time_modified', 'tags'}
-            
-            # Parse tags filter with optional service names
-            tags_services = None
-            parsed_filter_keys = []
-            for fk in filter_keys:
+            raw_filter_keys = [k.strip() for k in filter.split(',')]
+            for fk in raw_filter_keys:
                 if fk.startswith('tags(') and fk.endswith(')'):
                     # Extract service names from tags(service1,service2)
                     services_part = fk[5:-1]  # Remove 'tags(' and ')'
                     tags_services = services_part
                 else:
-                    parsed_filter_keys.append(fk)
+                    filter_keys.append(fk)
             
-            filter_keys = [k for k in parsed_filter_keys if k in valid_keys or k == 'tags']
+            filter_keys = [k for k in filter_keys if k in valid_keys or k == 'tags']
             if tags_services:
                 filter_keys.append('tags')
-            
+        
+        # Determine which optimization to use for get_file_metadata
+        # Priority: only_return_identifiers > only_return_basic_information > no optimization
+        # only_return_identifiers: best for file_id and/or hash only
+        # only_return_basic_information: good for file_id, hash, size, mime, dimensions, duration, has_audio
+        use_only_return_identifiers = False
+        use_only_return_basic_information = False
+
+        if filter:
+            # Check for only_return_identifiers optimization (highest priority)
+            # Valid when filter contains only 'file_id' and/or 'hash'
+            if set(filter_keys).issubset({'file_id', 'hash'}):
+                use_only_return_identifiers = True
+            # Check for only_return_basic_information optimization
+            # Valid when filter contains only basic file info fields
+            elif set(filter_keys).issubset({'file_id', 'hash', 'size', 'mime', 'dimensions', 'duration'}):
+                use_only_return_basic_information = True
+
+        # Determine what to pass to get_file_metadata
+        if has_hashes:
+            # Parse hashes - split by comma and strip whitespace
+            hash_list = [h.strip() for h in hashes.split(',') if h.strip()]
+            if not hash_list:
+                return "❌ Error: No valid hashes provided"
+            # Pass hashes directly to get_file_metadata (Hydrus API accepts hashes)
+            if use_only_return_identifiers:
+                metadata = client_obj.get_file_metadata(hashes=hash_list, only_return_identifiers=True)
+            elif use_only_return_basic_information:
+                metadata = client_obj.get_file_metadata(hashes=hash_list, only_return_basic_information=True)
+            else:
+                metadata = client_obj.get_file_metadata(hashes=hash_list)
+            # For display purposes, use the hashes as identifiers
+            identifiers = hash_list
+            identifier_type = "hash"
+        else:
+            # Parse file IDs using parse_file_ids function (handles single IDs, strings, lists, etc.)
+            file_ids_list = parse_file_ids(file_id)
+            if not file_ids_list:
+                return "❌ Error: No valid file IDs provided"
+            # Pass file IDs to get_file_metadata
+            if use_only_return_identifiers:
+                metadata = client_obj.get_file_metadata(file_ids=file_ids_list, only_return_identifiers=True)
+            elif use_only_return_basic_information:
+                metadata = client_obj.get_file_metadata(file_ids=file_ids_list, only_return_basic_information=True)
+            else:
+                metadata = client_obj.get_file_metadata(file_ids=file_ids_list)
+            identifiers = file_ids_list
+            identifier_type = "ID"
+
+        # Handle filter parameter
+        if filter:
             if not filter_keys:
                 return f"❌ Error: No valid filter keys provided. Valid options: {', '.join(valid_keys)}"
             
-            result = f"✅ File Metadata (filtered: {', '.join(filter_keys)}) for {len(file_ids_list)} file(s):\n"
+            # OPTIMIZATION: When filtering only for file_id or hash, return compact comma-separated list
+            if set(filter_keys) == {'file_id'} or set(filter_keys) == {'hash'}:
+                # Extract just the requested values and return as comma-separated list
+                if isinstance(metadata, dict) and 'metadata' in metadata:
+                    file_metadata_list = metadata['metadata']
+                    values = []
+                    for file_metadata in file_metadata_list:
+                        if isinstance(file_metadata, dict):
+                            if 'file_id' in filter_keys:
+                                values.append(str(file_metadata.get('file_id', '')))
+                            elif 'hash' in filter_keys and 'hash' in file_metadata:
+                                values.append(file_metadata['hash'])
+                    return ','.join(values)
+                elif isinstance(metadata, list):
+                    values = []
+                    for file_metadata in metadata:
+                        if isinstance(file_metadata, dict):
+                            if 'file_id' in filter_keys:
+                                values.append(str(file_metadata.get('file_id', '')))
+                            elif 'hash' in filter_keys and 'hash' in file_metadata:
+                                values.append(file_metadata['hash'])
+                    return ','.join(values)
+            
+            result = f"✅ File Metadata (filtered: {', '.join(filter_keys)}) for {len(identifiers)} file(s):\n"
             
             # The metadata response is a dict with 'metadata' key containing the list
             if isinstance(metadata, dict) and 'metadata' in metadata:
                 file_metadata_list = metadata['metadata']
                 for idx, file_metadata in enumerate(file_metadata_list):
-                    file_id_int = file_ids_list[idx]
+                    identifier = identifiers[idx]
                     if isinstance(file_metadata, dict):
-                        result += f"\nID {file_id_int}:\n"
+                        result += f"\n{identifier_type} {identifier}:\n"
+                        if 'file_id' in filter_keys:
+                            file_id = file_metadata.get('file_id', 'N/A')
+                            result += f"{file_id}\n"
                         if 'hash' in filter_keys and 'hash' in file_metadata:
                             result += f"{file_metadata['hash']}\n"
                         if 'size' in filter_keys and 'size' in file_metadata:
@@ -473,9 +552,12 @@ async def hydrus_get_file_metadata(
             elif isinstance(metadata, list):
                 # Fallback for direct list response
                 for idx, file_metadata in enumerate(metadata):
-                    file_id_int = file_ids_list[idx]
+                    identifier = identifiers[idx]
                     if isinstance(file_metadata, dict):
-                        result += f"\nFile ID {file_id_int}:\n"
+                        result += f"\n{identifier_type} {identifier}:\n"
+                        if 'file_id' in filter_keys:
+                            file_id = file_metadata.get('file_id', 'N/A')
+                            result += f"{file_id}\n"
                         if 'hash' in filter_keys and 'hash' in file_metadata:
                             result += f"{file_metadata['hash']}\n"
                         if 'size' in filter_keys and 'size' in file_metadata:
@@ -513,14 +595,14 @@ async def hydrus_get_file_metadata(
             return result.strip()
 
         # Full metadata output (default behavior)
-        result = f"✅ File Metadata for {len(file_ids_list)} file(s) (from {client_name}):"
+        result = f"✅ File Metadata for {len(identifiers)} file(s) (from {client_name}):"
         
         if isinstance(metadata, list):
             # Multiple files returned
             for idx, file_metadata in enumerate(metadata):
-                file_id_int = file_ids_list[idx]
+                identifier = identifiers[idx]
                 result += f"\n\n{'='*60}"
-                result += f"\nFile ID {file_id_int}:"
+                result += f"\nFile {identifier_type} {identifier}:"
                 result += f"\n{'='*60}"
                 if isinstance(file_metadata, dict):
                     for key, value in file_metadata.items():
@@ -532,8 +614,8 @@ async def hydrus_get_file_metadata(
                     result += f"\n- Raw data: {json.dumps(file_metadata) if isinstance(file_metadata, (dict, list)) else str(file_metadata)}"
         else:
             # Single file or dict response
-            file_id_int = file_ids_list[0] if len(file_ids_list) == 1 else file_ids_list
-            result += f"\n\nFile ID(s) {file_id_int}:"
+            identifier = identifiers[0] if len(identifiers) == 1 else identifiers
+            result += f"\n\nFile {identifier_type}(s) {identifier}:"
             if isinstance(metadata, dict):
                 for key, value in metadata.items():
                     if isinstance(value, dict):
@@ -1919,7 +2001,7 @@ async def hydrus_transcribe_audio(
 async def hydrus_execute(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
     action: Annotated[str, Field(description="Action to perform: 'list' to list available methods, or a method name to call (e.g., 'search_files', 'add_tags', 'get_file_metadata')")] = "list",
-    kwargs: Annotated[Optional[str], Field(description="JSON string of keyword arguments for the method. Example: '{\"tags\": [\"rating:safe\"], \"file_sort_type\": 13}'. Only used when calling a method, not for 'list' action.")] = None
+    kwargs: Annotated[Optional[str | dict], Field(description="JSON string or object of keyword arguments for the method. Example: '{\"tags\": [\"rating:safe\"], \"file_sort_type\": 13}'. Only used when calling a method, not for 'list' action.")] = None
 ) -> str:
     """Execute any hydrus_api.Client method dynamically, or list available methods.
     
@@ -2027,7 +2109,13 @@ async def hydrus_execute(
     method_kwargs = {}
     if kwargs:
         try:
-            method_kwargs = json.loads(kwargs)
+            # Handle both string (JSON) and dict (already parsed by framework)
+            if isinstance(kwargs, str):
+                method_kwargs = json.loads(kwargs)
+            elif isinstance(kwargs, dict):
+                method_kwargs = kwargs
+            else:
+                return f"❌ Error: 'kwargs' must be a JSON string or object, got {type(kwargs).__name__}"
         except json.JSONDecodeError as e:
             return f"❌ Error: Invalid JSON in 'kwargs' parameter - {str(e)}"
     

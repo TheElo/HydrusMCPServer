@@ -921,8 +921,9 @@ def extract_tags_by_service(tags_dict: dict, service_names: list[str] = None, ta
     
     Args:
         tags_dict: The tags dictionary from file metadata
-        service_names: Optional list of service names to filter. If None, returns all services.
+        service_names: Optional list of service names to filter. If None, returns all services EXCEPT 'all known tags'.
                        Can also be passed as a comma-separated string.
+                       Note: 'all known tags' is only included when explicitly requested in service_names, as it's the sum of all tag services.
         tag_type: Which tag type to extract - 'display_tags' or 'storage_tags' (default: 'display_tags')
                        
     Returns:
@@ -943,6 +944,12 @@ def extract_tags_by_service(tags_dict: dict, service_names: list[str] = None, ta
             continue
             
         service_name = service_data.get('name', service_key)
+        
+        # Skip 'all known tags' unless explicitly requested
+        # This is because 'all known tags' is just the sum of all other tag services
+        # and including it would be redundant and waste data/tokens
+        if service_name == 'all known tags' and (service_names is None or service_name not in service_names):
+            continue
         
         # Skip if service_names filter is specified and this service is not in the list
         if service_names and service_name not in service_names:

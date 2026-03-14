@@ -16,7 +16,7 @@ The Hydrus MCP Server provides the following tools:
 3. `hydrus_search_tags(client_name, search, tag_service, limit)` - Search for tags in Hydrus using keywords and wildcards
 4. `hydrus_query(client_name, query, tag_service, file_sort_type, trs)` - Query files in the Hydrus client using various search criteria
 5. `hydrus_get_tags(client_name, content, content_type, tag_service, trs, limit, result_limit)` - Get tags for files in Hydrus client
-6. `hydrus_get_file_metadata(client_name, file_id, filter)` - Get metadata for one or more files by their IDs (supports multiple file IDs and optional field filtering)
+6. `hydrus_get_file_metadata(client_name, file_id, hashes, filter)` - Get metadata for one or more files by their IDs or SHA256 hashes (supports multiple file IDs/hashes and optional field filtering)
 7. `hydrus_get_page_info(client_name, page_key)` - Get page information for a specific tab using its page key
 8. `hydrus_list_tabs(client_name, return_tab_keys)` - List open tabs in a Hydrus client
 9. `hydrus_focus_on_tab(client_name, tab_name)` - Focus the Hydrus client on a specific tab
