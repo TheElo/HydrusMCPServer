@@ -276,6 +276,106 @@ Add the following environment variables to your MCP configuration to enable the 
 - **Audio files**: MP3, WAV, AAC, FLAC, M4A
 - **Video files**: MP4, WebM, AVI (audio track is automatically extracted)
 
+# Optional: Streamable HTTP Transport
+
+By default, the Hydrus MCP Server uses the `stdio` transport, which is suitable for local MCP clients like Claude Desktop or LM Studio. However, you can also run the server with `streamable-http` or `sse` transport for web-based clients and remote access.
+
+## When to Use Streamable HTTP
+
+- **Web-based MCP clients** (e.g., llama-server webui, OpenWebUI)
+- **Remote access** to the MCP server from other machines
+- **Containerized deployments** (Docker, Kubernetes)
+- **Load-balanced or distributed setups**
+
+## Configuration
+
+Add the following environment variables to your MCP configuration:
+
+```json
+{
+    "mcpServers": {
+        "hydrus-mcp": {
+            "command": "uvx",
+            "args": [
+                "hydrus-mcp"
+            ],
+            "env": {
+                "HYDRUS_CLIENTS": "[[\"Name1\", \"http://localhost:45869/\", \"APIKEY1\"]]",
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_HOST": "0.0.0.0",
+                "MCP_PORT": "8000"
+            }
+        }
+    }
+}
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_TRANSPORT` | `stdio` | Transport type: `stdio`, `streamable-http`, or `sse` |
+| `MCP_HOST` | `127.0.0.1` | Host address to bind to (use `0.0.0.0` for external access) |
+| `MCP_PORT` | `8000` | Port number for HTTP transport |
+
+### Client Configuration for Streamable HTTP
+
+When using streamable-http transport, configure your MCP client to connect via URL:
+
+```json
+{
+    "mcpServers": {
+        "hydrus-mcp": {
+            "url": "http://localhost:8000"
+        }
+    }
+}
+```
+
+### Using with mcp-remote Proxy
+
+Some clients only support stdio but you want to use a remote HTTP server. You can use the `mcp-remote` proxy:
+
+```json
+{
+    "mcpServers": {
+        "hydrus-mcp": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "mcp-remote",
+                "http://localhost:8000"
+            ],
+            "env": {
+                "HYDRUS_CLIENTS": "[[\"Name1\", \"http://localhost:45869/\", \"APIKEY1\"]]"
+            }
+        }
+    }
+}
+```
+
+## Running as a Standalone HTTP Server
+
+You can also run the server as a standalone HTTP service:
+
+```bash
+export MCP_TRANSPORT=streamable-http
+export MCP_HOST=0.0.0.0
+export MCP_PORT=8000
+export HYDRUS_CLIENTS='[["Name1", "http://localhost:45869/", "APIKEY1"]]'
+uv run -m hydrus_mcp.server
+```
+
+Or with uvx:
+
+```bash
+MCP_TRANSPORT=streamable-http MCP_HOST=0.0.0.0 MCP_PORT=8000 HYDRUS_CLIENTS='[["Name1", "http://localhost:45869/", "APIKEY1"]] uvx hydrus-mcp
+```
+
+The server will start and listen on the specified host and port.
+
+---
+
 # Optional: Execute Any Hydrus API Method
 
 The `hydrus_execute` tool allows the LLM to call ANY method available on the `hydrus_api.Client` object dynamically. This provides access to all 62+ Hydrus API methods that may not have dedicated MCP tools.

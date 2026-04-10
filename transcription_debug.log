@@ -1,0 +1,264 @@
+[2026-03-11 23:30:17.665] ============================================================
+[2026-03-11 23:30:17.666] STARTING TRANSCRIPTION - client: mn, file_id: 61298134
+[2026-03-11 23:30:17.666] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:30:17.933] Starting audio extraction from video (1.3MB)
+[2026-03-11 23:30:17.934] Source file path: Q:\HYDRUS\ARC MN FILES\f61\618a308c9f1d8ff50bf0635597fb6e08cfce0dff98090aa19afb357016a200ef.webm
+[2026-03-11 23:30:17.935] Audio output path: C:\tmp\tmpjbuh1m6n.mp3
+[2026-03-11 23:30:17.935] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f61\618a308c9f1d8ff50bf0635597fb6e08cfce0dff98090aa19afb357016a200ef.webm -vn -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k -y C:\tmp\tmpjbuh1m6n.mp3
+[2026-03-11 23:30:18.017] Audio extraction completed in 0.1s
+[2026-03-11 23:30:18.017] Extracted audio size: 0.0MB (37875 bytes)
+[2026-03-11 23:30:18.017] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:30:18.018] Audio file size to upload: 0.0MB (37875 bytes)
+[2026-03-11 23:30:18.224] Read 37875 bytes from audio file, starting POST request
+[2026-03-11 23:30:23.932] API response received: status=200
+[2026-03-11 23:30:23.933] Transcription received: 49 characters
+[2026-03-11 23:30:23.933] API transcription completed in 5.9s
+[2026-03-11 23:30:23.933] SUCCESS - Total time: 6.3s
+[2026-03-11 23:30:23.942] ============================================================
+[2026-03-11 23:30:23.942] STARTING TRANSCRIPTION - client: mn, file_id: 37197359
+[2026-03-11 23:30:23.942] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:30:24.144] Starting audio extraction from video (4.0MB)
+[2026-03-11 23:30:24.144] Source file path: Q:\HYDRUS\ARC MN FILES\fa7\a7ea75b418ca4b9683fb79a2f0c17643cf65fd2884a24d72aaa766815ada03a0.webm
+[2026-03-11 23:30:24.144] Audio output path: C:\tmp\tmphzqxwp97.mp3
+[2026-03-11 23:30:24.144] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\fa7\a7ea75b418ca4b9683fb79a2f0c17643cf65fd2884a24d72aaa766815ada03a0.webm -vn -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k -y C:\tmp\tmphzqxwp97.mp3
+[2026-03-11 23:30:24.277] Audio extraction completed in 0.1s
+[2026-03-11 23:30:24.277] Extracted audio size: 0.2MB (241197 bytes)
+[2026-03-11 23:30:24.277] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:30:24.277] Audio file size to upload: 0.2MB (241197 bytes)
+[2026-03-11 23:30:24.495] Read 241197 bytes from audio file, starting POST request
+[2026-03-11 23:30:31.537] API response received: status=200
+[2026-03-11 23:30:31.537] Transcription received: 281 characters
+[2026-03-11 23:30:31.538] API transcription completed in 7.3s
+[2026-03-11 23:30:31.538] SUCCESS - Total time: 7.6s
+[2026-03-11 23:30:31.542] ============================================================
+[2026-03-11 23:30:31.542] STARTING TRANSCRIPTION - client: mn, file_id: 67340405
+[2026-03-11 23:30:31.542] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:30:31.860] Starting audio extraction from video (24.4MB)
+[2026-03-11 23:30:31.860] Source file path: Q:\HYDRUS\ARC MN FILES\f43\43c29e9532c2af285e1b72a98846d0c1f5558bbe57fe30c195438c6ed3831b4b.mp4
+[2026-03-11 23:30:31.860] Audio output path: C:\tmp\tmpdstvr6cs.mp3
+[2026-03-11 23:30:31.860] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f43\43c29e9532c2af285e1b72a98846d0c1f5558bbe57fe30c195438c6ed3831b4b.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k -y C:\tmp\tmpdstvr6cs.mp3
+[2026-03-11 23:30:32.090] Audio extraction completed in 0.2s
+[2026-03-11 23:30:32.090] Extracted audio size: 0.5MB (476781 bytes)
+[2026-03-11 23:30:32.090] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:30:32.090] Audio file size to upload: 0.5MB (476781 bytes)
+[2026-03-11 23:30:32.362] Read 476781 bytes from audio file, starting POST request
+[2026-03-11 23:30:43.412] API response received: status=200
+[2026-03-11 23:30:43.412] Transcription received: 124 characters
+[2026-03-11 23:30:43.413] API transcription completed in 11.3s
+[2026-03-11 23:30:43.413] SUCCESS - Total time: 11.9s
+[2026-03-11 23:30:43.417] ============================================================
+[2026-03-11 23:30:43.418] STARTING TRANSCRIPTION - client: mn, file_id: 67889588
+[2026-03-11 23:30:43.418] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:30:43.601] Starting audio extraction from video (141.5MB)
+[2026-03-11 23:30:43.601] Source file path: Q:\HYDRUS\ARC MN FILES\f2f\2f4285d99344527aafd0a616da86044f5a1c8b0c61386eb34c86673d25b3e4af.mp4
+[2026-03-11 23:30:43.601] Audio output path: C:\tmp\tmpddik0544.mp3
+[2026-03-11 23:30:43.601] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f2f\2f4285d99344527aafd0a616da86044f5a1c8b0c61386eb34c86673d25b3e4af.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k -y C:\tmp\tmpddik0544.mp3
+[2026-03-11 23:30:44.087] Audio extraction completed in 0.5s
+[2026-03-11 23:30:44.087] Extracted audio size: 2.2MB (2329230 bytes)
+[2026-03-11 23:30:44.087] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:30:44.087] Audio file size to upload: 2.2MB (2329230 bytes)
+[2026-03-11 23:30:44.263] Read 2329230 bytes from audio file, starting POST request
+[2026-03-11 23:31:17.856] API response received: status=200
+[2026-03-11 23:31:17.857] Transcription received: 1425 characters
+[2026-03-11 23:31:17.857] API transcription completed in 33.8s
+[2026-03-11 23:31:17.857] SUCCESS - Total time: 34.4s
+[2026-03-11 23:31:17.862] ============================================================
+[2026-03-11 23:31:17.862] STARTING TRANSCRIPTION - client: mn, file_id: 67887992
+[2026-03-11 23:31:17.862] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:31:18.040] Starting audio extraction from video (1001.7MB)
+[2026-03-11 23:31:18.040] Source file path: Q:\HYDRUS\ARC MN FILES\f54\547978ca69ef6b65a7af1f1d50ebc349d72f40ea7f9eb0b290a0ad0f4ba00324.mp4
+[2026-03-11 23:31:18.041] Audio output path: C:\tmp\tmpd7onf_hd.mp3
+[2026-03-11 23:31:18.041] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f54\547978ca69ef6b65a7af1f1d50ebc349d72f40ea7f9eb0b290a0ad0f4ba00324.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k -y C:\tmp\tmpd7onf_hd.mp3
+[2026-03-11 23:43:17.874] Audio extraction timed out
+[2026-03-11 23:43:17.879] ============================================================
+[2026-03-11 23:43:17.879] STARTING TRANSCRIPTION - client: mn, file_id: 67888688
+[2026-03-11 23:43:17.879] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:43:18.188] Starting audio extraction from video (378.7MB)
+[2026-03-11 23:43:18.188] Source file path: Q:\HYDRUS\ARC MN FILES\f1a\1ac0ea8bc01d80f114532d81cef3310ac8ff6a43a82b6de2fbec341ae3ccbb4e.mp4
+[2026-03-11 23:43:18.189] Audio output path: C:\tmp\tmp6nwal9lj.mp3
+[2026-03-11 23:43:18.189] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f1a\1ac0ea8bc01d80f114532d81cef3310ac8ff6a43a82b6de2fbec341ae3ccbb4e.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k -y C:\tmp\tmp6nwal9lj.mp3
+[2026-03-11 23:47:03.037] Audio extraction completed in 224.8s
+[2026-03-11 23:47:03.037] Extracted audio size: 9.2MB (9608403 bytes)
+[2026-03-11 23:47:03.037] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:47:03.037] Audio file size to upload: 9.2MB (9608403 bytes)
+[2026-03-11 23:47:03.256] Read 9608403 bytes from audio file, starting POST request
+[2026-03-11 23:48:40.160] ============================================================
+[2026-03-11 23:48:40.160] STARTING TRANSCRIPTION - client: mn, file_id: 61298134
+[2026-03-11 23:48:40.160] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:48:40.454] Starting audio extraction from video (1.3MB)
+[2026-03-11 23:48:40.455] Source file path: Q:\HYDRUS\ARC MN FILES\f61\618a308c9f1d8ff50bf0635597fb6e08cfce0dff98090aa19afb357016a200ef.webm
+[2026-03-11 23:48:40.457] Audio output path: C:\tmp\tmpjdhn2ovj.mp3
+[2026-03-11 23:48:40.457] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f61\618a308c9f1d8ff50bf0635597fb6e08cfce0dff98090aa19afb357016a200ef.webm -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmpjdhn2ovj.mp3
+[2026-03-11 23:48:40.541] Audio extraction completed in 0.1s
+[2026-03-11 23:48:40.541] Extracted audio size: 0.0MB (37875 bytes)
+[2026-03-11 23:48:40.541] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:48:40.541] Audio file size to upload: 0.0MB (37875 bytes)
+[2026-03-11 23:48:40.792] Read 37875 bytes from audio file, starting POST request
+[2026-03-11 23:48:43.178] API response received: status=200
+[2026-03-11 23:48:43.179] Transcription received: 49 characters
+[2026-03-11 23:48:43.179] API transcription completed in 2.6s
+[2026-03-11 23:48:43.179] SUCCESS - Total time: 3.0s
+[2026-03-11 23:48:43.185] ============================================================
+[2026-03-11 23:48:43.185] STARTING TRANSCRIPTION - client: mn, file_id: 37197359
+[2026-03-11 23:48:43.185] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:48:43.441] Starting audio extraction from video (4.0MB)
+[2026-03-11 23:48:43.441] Source file path: Q:\HYDRUS\ARC MN FILES\fa7\a7ea75b418ca4b9683fb79a2f0c17643cf65fd2884a24d72aaa766815ada03a0.webm
+[2026-03-11 23:48:43.441] Audio output path: C:\tmp\tmpnnbojq_8.mp3
+[2026-03-11 23:48:43.441] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\fa7\a7ea75b418ca4b9683fb79a2f0c17643cf65fd2884a24d72aaa766815ada03a0.webm -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmpnnbojq_8.mp3
+[2026-03-11 23:48:43.616] Audio extraction completed in 0.2s
+[2026-03-11 23:48:43.616] Extracted audio size: 0.2MB (241197 bytes)
+[2026-03-11 23:48:43.616] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:48:43.617] Audio file size to upload: 0.2MB (241197 bytes)
+[2026-03-11 23:48:43.832] Read 241197 bytes from audio file, starting POST request
+[2026-03-11 23:48:50.285] API response received: status=200
+[2026-03-11 23:48:50.286] Transcription received: 281 characters
+[2026-03-11 23:48:50.287] API transcription completed in 6.7s
+[2026-03-11 23:48:50.288] SUCCESS - Total time: 7.1s
+[2026-03-11 23:48:50.293] ============================================================
+[2026-03-11 23:48:50.293] STARTING TRANSCRIPTION - client: mn, file_id: 67340405
+[2026-03-11 23:48:50.293] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:48:50.556] Starting audio extraction from video (24.4MB)
+[2026-03-11 23:48:50.556] Source file path: Q:\HYDRUS\ARC MN FILES\f43\43c29e9532c2af285e1b72a98846d0c1f5558bbe57fe30c195438c6ed3831b4b.mp4
+[2026-03-11 23:48:50.556] Audio output path: C:\tmp\tmp19xyzn3y.mp3
+[2026-03-11 23:48:50.556] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f43\43c29e9532c2af285e1b72a98846d0c1f5558bbe57fe30c195438c6ed3831b4b.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmp19xyzn3y.mp3
+[2026-03-11 23:48:50.734] Audio extraction completed in 0.2s
+[2026-03-11 23:48:50.734] Extracted audio size: 0.5MB (476781 bytes)
+[2026-03-11 23:48:50.734] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:48:50.735] Audio file size to upload: 0.5MB (476781 bytes)
+[2026-03-11 23:48:50.917] Read 476781 bytes from audio file, starting POST request
+[2026-03-11 23:48:59.553] API response received: status=200
+[2026-03-11 23:48:59.553] Transcription received: 124 characters
+[2026-03-11 23:48:59.554] API transcription completed in 8.8s
+[2026-03-11 23:48:59.554] SUCCESS - Total time: 9.3s
+[2026-03-11 23:48:59.557] ============================================================
+[2026-03-11 23:48:59.557] STARTING TRANSCRIPTION - client: mn, file_id: 67889588
+[2026-03-11 23:48:59.558] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:48:59.731] Starting audio extraction from video (141.5MB)
+[2026-03-11 23:48:59.731] Source file path: Q:\HYDRUS\ARC MN FILES\f2f\2f4285d99344527aafd0a616da86044f5a1c8b0c61386eb34c86673d25b3e4af.mp4
+[2026-03-11 23:48:59.731] Audio output path: C:\tmp\tmpcredeabw.mp3
+[2026-03-11 23:48:59.731] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f2f\2f4285d99344527aafd0a616da86044f5a1c8b0c61386eb34c86673d25b3e4af.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmpcredeabw.mp3
+[2026-03-11 23:49:00.226] Audio extraction completed in 0.5s
+[2026-03-11 23:49:00.226] Extracted audio size: 2.2MB (2329230 bytes)
+[2026-03-11 23:49:00.226] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:49:00.226] Audio file size to upload: 2.2MB (2329230 bytes)
+[2026-03-11 23:49:00.400] Read 2329230 bytes from audio file, starting POST request
+[2026-03-11 23:49:31.963] API response received: status=200
+[2026-03-11 23:49:31.963] Transcription received: 1425 characters
+[2026-03-11 23:49:31.964] API transcription completed in 31.7s
+[2026-03-11 23:49:31.964] SUCCESS - Total time: 32.4s
+[2026-03-11 23:49:31.969] ============================================================
+[2026-03-11 23:49:31.969] STARTING TRANSCRIPTION - client: mn, file_id: 67887992
+[2026-03-11 23:49:31.970] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:49:32.141] Starting audio extraction from video (1001.7MB)
+[2026-03-11 23:49:32.141] Source file path: Q:\HYDRUS\ARC MN FILES\f54\547978ca69ef6b65a7af1f1d50ebc349d72f40ea7f9eb0b290a0ad0f4ba00324.mp4
+[2026-03-11 23:49:32.141] Audio output path: C:\tmp\tmp917qix9v.mp3
+[2026-03-11 23:49:32.142] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f54\547978ca69ef6b65a7af1f1d50ebc349d72f40ea7f9eb0b290a0ad0f4ba00324.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmp917qix9v.mp3
+[2026-03-11 23:52:33.228] Audio extraction completed in 181.1s
+[2026-03-11 23:52:33.228] Extracted audio size: 4.5MB (4746099 bytes)
+[2026-03-11 23:52:33.228] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:52:33.229] Audio file size to upload: 4.5MB (4746099 bytes)
+[2026-03-11 23:52:33.451] Read 4746099 bytes from audio file, starting POST request
+[2026-03-11 23:52:53.066] ============================================================
+[2026-03-11 23:52:53.067] STARTING TRANSCRIPTION - client: mn, file_id: 61298134
+[2026-03-11 23:52:53.067] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:52:53.297] Starting audio extraction from video (1.3MB)
+[2026-03-11 23:52:53.297] Source file path: Q:\HYDRUS\ARC MN FILES\f61\618a308c9f1d8ff50bf0635597fb6e08cfce0dff98090aa19afb357016a200ef.webm
+[2026-03-11 23:52:53.297] Audio output path: C:\tmp\tmpko5kgbsq.mp3
+[2026-03-11 23:52:53.297] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f61\618a308c9f1d8ff50bf0635597fb6e08cfce0dff98090aa19afb357016a200ef.webm -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmpko5kgbsq.mp3
+[2026-03-11 23:52:53.369] Audio extraction completed in 0.1s
+[2026-03-11 23:52:53.369] Extracted audio size: 0.0MB (37875 bytes)
+[2026-03-11 23:52:53.369] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:52:53.369] Audio file size to upload: 0.0MB (37875 bytes)
+[2026-03-11 23:52:53.548] Read 37875 bytes from audio file, starting POST request
+[2026-03-11 23:52:55.283] API response received: status=200
+[2026-03-11 23:52:55.283] Transcription received: 49 characters
+[2026-03-11 23:52:55.283] API transcription completed in 1.9s
+[2026-03-11 23:52:55.283] SUCCESS - Total time: 2.2s
+[2026-03-11 23:52:55.288] ============================================================
+[2026-03-11 23:52:55.288] STARTING TRANSCRIPTION - client: mn, file_id: 37197359
+[2026-03-11 23:52:55.288] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:52:55.465] Starting audio extraction from video (4.0MB)
+[2026-03-11 23:52:55.465] Source file path: Q:\HYDRUS\ARC MN FILES\fa7\a7ea75b418ca4b9683fb79a2f0c17643cf65fd2884a24d72aaa766815ada03a0.webm
+[2026-03-11 23:52:55.465] Audio output path: C:\tmp\tmpuvrdxyxm.mp3
+[2026-03-11 23:52:55.466] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\fa7\a7ea75b418ca4b9683fb79a2f0c17643cf65fd2884a24d72aaa766815ada03a0.webm -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmpuvrdxyxm.mp3
+[2026-03-11 23:52:55.567] Audio extraction completed in 0.1s
+[2026-03-11 23:52:55.568] Extracted audio size: 0.2MB (241197 bytes)
+[2026-03-11 23:52:55.568] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:52:55.568] Audio file size to upload: 0.2MB (241197 bytes)
+[2026-03-11 23:52:55.755] Read 241197 bytes from audio file, starting POST request
+[2026-03-11 23:53:01.804] API response received: status=200
+[2026-03-11 23:53:01.805] Transcription received: 281 characters
+[2026-03-11 23:53:01.806] API transcription completed in 6.2s
+[2026-03-11 23:53:01.806] SUCCESS - Total time: 6.5s
+[2026-03-11 23:53:01.810] ============================================================
+[2026-03-11 23:53:01.810] STARTING TRANSCRIPTION - client: mn, file_id: 67340405
+[2026-03-11 23:53:01.810] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:53:02.025] Starting audio extraction from video (24.4MB)
+[2026-03-11 23:53:02.025] Source file path: Q:\HYDRUS\ARC MN FILES\f43\43c29e9532c2af285e1b72a98846d0c1f5558bbe57fe30c195438c6ed3831b4b.mp4
+[2026-03-11 23:53:02.025] Audio output path: C:\tmp\tmp2fmc_q1j.mp3
+[2026-03-11 23:53:02.026] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f43\43c29e9532c2af285e1b72a98846d0c1f5558bbe57fe30c195438c6ed3831b4b.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmp2fmc_q1j.mp3
+[2026-03-11 23:53:02.222] Audio extraction completed in 0.2s
+[2026-03-11 23:53:02.223] Extracted audio size: 0.5MB (476781 bytes)
+[2026-03-11 23:53:02.223] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:53:02.224] Audio file size to upload: 0.5MB (476781 bytes)
+[2026-03-11 23:53:02.476] Read 476781 bytes from audio file, starting POST request
+[2026-03-11 23:53:41.213] ============================================================
+[2026-03-11 23:53:41.214] STARTING TRANSCRIPTION - client: mn, file_id: 61298134
+[2026-03-11 23:53:41.214] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:53:41.404] Starting audio extraction from video (1.3MB)
+[2026-03-11 23:53:41.404] Source file path: Q:\HYDRUS\ARC MN FILES\f61\618a308c9f1d8ff50bf0635597fb6e08cfce0dff98090aa19afb357016a200ef.webm
+[2026-03-11 23:53:41.404] Audio output path: C:\tmp\tmp9mjmscdi.mp3
+[2026-03-11 23:53:41.405] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f61\618a308c9f1d8ff50bf0635597fb6e08cfce0dff98090aa19afb357016a200ef.webm -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmp9mjmscdi.mp3
+[2026-03-11 23:53:41.470] Audio extraction completed in 0.1s
+[2026-03-11 23:53:41.470] Extracted audio size: 0.0MB (37875 bytes)
+[2026-03-11 23:53:41.470] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:53:41.470] Audio file size to upload: 0.0MB (37875 bytes)
+[2026-03-11 23:53:41.682] Read 37875 bytes from audio file, starting POST request
+[2026-03-11 23:53:43.528] API response received: status=200
+[2026-03-11 23:53:43.528] Transcription received: 49 characters
+[2026-03-11 23:53:43.529] API transcription completed in 2.1s
+[2026-03-11 23:53:43.529] SUCCESS - Total time: 2.3s
+[2026-03-11 23:53:43.644] ============================================================
+[2026-03-11 23:53:43.644] STARTING TRANSCRIPTION - client: mn, file_id: 37197359
+[2026-03-11 23:53:43.644] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:53:43.851] Starting audio extraction from video (4.0MB)
+[2026-03-11 23:53:43.851] Source file path: Q:\HYDRUS\ARC MN FILES\fa7\a7ea75b418ca4b9683fb79a2f0c17643cf65fd2884a24d72aaa766815ada03a0.webm
+[2026-03-11 23:53:43.851] Audio output path: C:\tmp\tmp766rhysz.mp3
+[2026-03-11 23:53:43.851] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\fa7\a7ea75b418ca4b9683fb79a2f0c17643cf65fd2884a24d72aaa766815ada03a0.webm -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmp766rhysz.mp3
+[2026-03-11 23:53:43.949] Audio extraction completed in 0.1s
+[2026-03-11 23:53:43.949] Extracted audio size: 0.2MB (241197 bytes)
+[2026-03-11 23:53:43.949] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:53:43.949] Audio file size to upload: 0.2MB (241197 bytes)
+[2026-03-11 23:53:44.126] Read 241197 bytes from audio file, starting POST request
+[2026-03-11 23:53:50.338] API response received: status=200
+[2026-03-11 23:53:50.338] Transcription received: 281 characters
+[2026-03-11 23:53:50.340] API transcription completed in 6.4s
+[2026-03-11 23:53:50.340] SUCCESS - Total time: 6.7s
+[2026-03-11 23:53:50.347] ============================================================
+[2026-03-11 23:53:50.347] STARTING TRANSCRIPTION - client: mn, file_id: 67340405
+[2026-03-11 23:53:50.347] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:53:50.658] Starting audio extraction from video (24.4MB)
+[2026-03-11 23:53:50.659] Source file path: Q:\HYDRUS\ARC MN FILES\f43\43c29e9532c2af285e1b72a98846d0c1f5558bbe57fe30c195438c6ed3831b4b.mp4
+[2026-03-11 23:53:50.659] Audio output path: C:\tmp\tmp0iw6mlk5.mp3
+[2026-03-11 23:53:50.659] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f43\43c29e9532c2af285e1b72a98846d0c1f5558bbe57fe30c195438c6ed3831b4b.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmp0iw6mlk5.mp3
+[2026-03-11 23:53:50.856] Audio extraction completed in 0.2s
+[2026-03-11 23:53:50.857] Extracted audio size: 0.5MB (476781 bytes)
+[2026-03-11 23:53:50.857] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:53:50.857] Audio file size to upload: 0.5MB (476781 bytes)
+[2026-03-11 23:53:51.160] Read 476781 bytes from audio file, starting POST request
+[2026-03-11 23:54:01.816] API response received: status=200
+[2026-03-11 23:54:01.816] Transcription received: 124 characters
+[2026-03-11 23:54:01.816] API transcription completed in 11.0s
+[2026-03-11 23:54:01.817] SUCCESS - Total time: 11.5s
+[2026-03-11 23:54:01.820] ============================================================
+[2026-03-11 23:54:01.820] STARTING TRANSCRIPTION - client: mn, file_id: 67889588
+[2026-03-11 23:54:01.821] STT_API_URL: http://192.168.1.20:5092/v1/audio/transcriptions, MODEL: parakeet-tdt-0.6b-v3
+[2026-03-11 23:54:02.054] Starting audio extraction from video (141.5MB)
+[2026-03-11 23:54:02.054] Source file path: Q:\HYDRUS\ARC MN FILES\f2f\2f4285d99344527aafd0a616da86044f5a1c8b0c61386eb34c86673d25b3e4af.mp4
+[2026-03-11 23:54:02.055] Audio output path: C:\tmp\tmpjl3zna4d.mp3
+[2026-03-11 23:54:02.055] Running ffmpeg: ffmpeg -i Q:\HYDRUS\ARC MN FILES\f2f\2f4285d99344527aafd0a616da86044f5a1c8b0c61386eb34c86673d25b3e4af.mp4 -vn -acodec libmp3lame -ar 16000 -ac 1 -loglevel quiet -b:a 64k -y C:\tmp\tmpjl3zna4d.mp3
+[2026-03-11 23:55:27.740] Audio extraction completed in 85.7s
+[2026-03-11 23:55:27.740] Extracted audio size: 2.2MB (2329230 bytes)
+[2026-03-11 23:55:27.741] Starting transcription API request to http://192.168.1.20:5092/v1/audio/transcriptions
+[2026-03-11 23:55:27.741] Audio file size to upload: 2.2MB (2329230 bytes)
+[2026-03-11 23:55:28.022] Read 2329230 bytes from audio file, starting POST request

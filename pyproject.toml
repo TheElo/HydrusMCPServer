@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hydrus-mcp"
-version = "1.2.1"
+version = "1.2.3"
 description = "MCP Server for Hydrus - Allowing your LLM to interact with your hydrus client to interact with your media"
 readme = "README.md"
 license = {text = "MIT"}
@@ -18,7 +18,7 @@ dependencies = [
     "hydrus_api>=1.0.0",
     "requests>=2.32.5",
     "beautifulsoup4>=4.14.3",
-    "opencv-python>=4.10.0",
+    "opencv-python-headless>=4.10.0",
     "numpy>=2.0.0",
 ]
 

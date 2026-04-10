@@ -671,12 +671,15 @@ async def hydrus_get_page_info(
 @mcp.tool()
 async def hydrus_list_tabs(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    return_tab_keys: Annotated[bool, Field(description="If True, includes page keys in the output (default: False)")] = False
+    return_tab_keys: Annotated[Any, Field(description="If True, includes page keys in the output (default: False)")] = False
 ) -> str:
     """List open tabs in a Hydrus client. Optionally returns tab keys along with names."""
     client_obj, error = validate_client(client_name)
     if error:
         return error
+
+    # Convert return_tab_keys to boolean using safe conversion to handle various input formats
+    return_tab_keys = safe_bool_convert(return_tab_keys, False)
 
     # Get pages from the client using get_page_list helper
     page_list, error = get_page_list(client_obj)
@@ -835,9 +838,9 @@ async def hydrus_send(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
     link: Annotated[str, Field(description="Direct link to file or base link for scraping")] = "",
     service_names_to_additional_tags: Annotated[Optional[str], Field(description="Optional JSON string mapping service names to tag lists, e.g., '{\"local\": [\"tag1\", \"tag2\"]}'")] = None,
-    subdir: Annotated[bool, Field(description="If True, recursively scrape subdirectories from base link (default: False)")] = False,
+    subdir: Annotated[Any, Field(description="If True, recursively scrape subdirectories from base link (default: False)")] = False,
     max_depth: Annotated[Any, Field(description="Maximum depth for recursive scraping (default: 2)")] = 2,
-    filename: Annotated[bool, Field(description="If True, extract filename and add as 'filename:' tag (default: True)")] = True,
+    filename: Annotated[Any, Field(description="If True, extract filename and add as 'filename:' tag (default: True)")] = True,
     destination_page_name: Annotated[str, Field(description="Name of the destination page in Hydrus (default: 'hydrus_mcp')")] = "hydrus_mcp"
 ) -> str:
     """Send a link to be downloaded to Hydrus. Can send a direct file link or a base URL for recursive scraping.
@@ -850,6 +853,10 @@ async def hydrus_send(
     
     if not link.strip():
         return "❌ Error: Link is required"
+
+    # Convert boolean parameters using safe conversion to handle various input formats
+    subdir = safe_bool_convert(subdir, False)
+    filename = safe_bool_convert(filename, True)
 
     try:
         # Parse service_names_to_additional_tags if provided
@@ -2146,8 +2153,21 @@ def main():
     if not clients:
         print("Warning: No Hydrus clients configured. Set HYDRUS_CLIENTS environment variable with client credentials.")
 
-    mcp.run(transport='stdio')
+    # Get transport configuration from environment variables
+    # Default to 'stdio' for backward compatibility
+    transport = os.getenv("MCP_TRANSPORT", "stdio")
+    host = os.getenv("MCP_HOST", "127.0.0.1")
+    port = int(os.getenv("MCP_PORT", "8000"))
 
+    if transport == "streamable-http":
+        print(f"Starting MCP server with streamable-http transport on {host}:{port}")
+        mcp.run(transport=transport, host=host, port=port)
+    elif transport == "sse":
+        print(f"Starting MCP server with SSE transport on {host}:{port}")
+        mcp.run(transport=transport, host=host, port=port)
+    else:
+        print("Starting MCP server with stdio transport")
+        mcp.run(transport='stdio')
 
 
 if __name__ == "__main__":
