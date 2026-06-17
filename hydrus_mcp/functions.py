@@ -126,38 +126,52 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
     else:
         tag_service_key = get_service_key_by_name(client_obj, "all known tags")
 
+    svc_key = str(tag_service_key)
+
     # Process in batches of 3
     batch_size = 3
     tag_counts: dict[str, int] = {}
-    processed = 0   # files whose metadata we actually read (a file with no tags here STILL counts)
+    counted = 0          # files whose metadata we actually read
+    no_metadata = 0      # get_file_metadata returned nothing for these (even retried alone)
+    empty: list[Any] = []        # read OK but the expected current-tags path yielded nothing
+    empty_sample: list[dict] = []  # structure of the first few `empty` files, for diagnosis
 
     for i in range(0, len(file_ids), batch_size):
         batch_file_ids = file_ids[i:i + batch_size]
         try:
             metadata = _fetch_metadata(client_obj, batch_file_ids)
         except Exception:
-            # retry per-file so one bad id doesn't drop its two batchmates
+            # one bad id can poison the whole batch — retry each file alone so batchmates survive
             metadata = []
             for fid in batch_file_ids:
                 try:
                     metadata.extend(_fetch_metadata(client_obj, [fid]))
                 except Exception:
-                    pass   # genuinely unreadable; surfaced via the processed-vs-total gap below
+                    no_metadata += 1
 
-        # Iterate the per-file metadata list. `_storage_tags` is tolerant: a file with no current
-        # tags in this service contributes nothing but is still counted as processed — it is NOT
-        # an error to be excused (the earlier KeyError-on-["0"] was silently dropping ~untagged
-        # files out of the denominator).
         for item in metadata:
             if not isinstance(item, dict):
                 continue
-            processed += 1
-            for tag in _storage_tags(item, tag_service_key):
-                tag_counts[tag] = tag_counts.get(tag, 0) + 1
-
-    # Files Hydrus never returned metadata for at all (e.g. deleted-but-still-indexed). An
-    # untagged file is NOT counted here — it was processed, it simply contributed no tags.
-    skipped = max(0, len(file_ids) - processed)
+            counted += 1
+            tags = _storage_tags(item, svc_key)
+            if tags:
+                for tag in tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            else:
+                # Metadata is present but tags[svc_key]["storage_tags"]["0"] gave nothing. Don't
+                # guess why — record what IS there (is the expected service key present? which tag
+                # statuses exist?) so a genuine gap is DIAGNOSED rather than silently swallowed.
+                empty.append(item.get("file_id"))
+                if len(empty_sample) < 8:
+                    all_tags = item.get("tags") or {}
+                    svc = all_tags.get(svc_key) or {}
+                    empty_sample.append({
+                        "file_id": item.get("file_id"),
+                        "has_expected_service_key": svc_key in all_tags,
+                        "service_keys_present": list(all_tags.keys()),
+                        "storage_tags_statuses": list((svc.get("storage_tags") or {}).keys()),
+                        "display_tags_statuses": list((svc.get("display_tags") or {}).keys()),
+                    })
 
     # Convert to list of [tag, count] pairs sorted by count (highest to lowest)
     result = [[tag, count] for tag, count in tag_counts.items()]
@@ -172,9 +186,18 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
         except (ValueError, TypeError):
             pass
 
-    # Returns (rows, skipped) where skipped = files Hydrus returned no metadata for — reported as
-    # text, never as a tag.
-    return result, skipped
+    # Returns (rows, diag). diag fully accounts for every requested file and, when some come back
+    # without tags, samples their actual structure so the caller can report WHY rather than excuse
+    # them silently.
+    diag = {
+        "matched": len(file_ids),
+        "counted": counted,
+        "no_metadata": no_metadata,
+        "empty_tags": len(empty),
+        "expected_service_key": svc_key,
+        "empty_sample": empty_sample,
+    }
+    return result, diag
 
 def parse_hydrus_tags(query, additional_tags=None):
             """Parse Hydrus query string into proper tag structure

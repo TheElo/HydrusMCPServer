@@ -226,6 +226,22 @@ async def hydrus_query(
         return json.dumps({"error": str(e)})
 
 
+def _coverage_note(tag_service, diag):
+    """Render get_tags_summary diagnostics as text — only when something didn't fully account,
+    so a clean run stays quiet. Surfaces WHICH files came back without tags and what their
+    metadata actually contained, instead of silently dropping them from the denominator."""
+    if not diag.get("no_metadata") and not diag.get("empty_tags"):
+        return ""
+    parts = [f"COVERAGE: counted {diag['counted']} of {diag['matched']} files"]
+    if diag.get("no_metadata"):
+        parts.append(f"{diag['no_metadata']} returned no metadata at all")
+    if diag.get("empty_tags"):
+        parts.append(f"{diag['empty_tags']} had no tags via '{tag_service}' "
+                     f"(expected service key {diag['expected_service_key']}); "
+                     f"sample {diag['empty_sample']}")
+    return " " + "; ".join(parts) + "."
+
+
 @mcp.tool()
 async def hydrus_get_tags(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
@@ -291,7 +307,7 @@ async def hydrus_get_tags(
                 # Check threshold for summary view
                 if trs_int < result_count:
                     result_limit_int = safe_int_convert(result_limit, 150)
-                    summary_result, err = get_tags_summary(
+                    summary_result, diag = get_tags_summary(
                         client_obj, file_ids=sample_ids, tag_service=tag_service)
                     total_distinct = len(summary_result)
                     if result_limit_int > 0 and total_distinct > result_limit_int:
@@ -301,13 +317,11 @@ async def hydrus_get_tags(
                                    f" The distribution below is a SAMPLE over the first {sampled} of "
                                    f"{result_count} matching files — raise `limit` or set it to 0 for "
                                    f"the full set.")
-                    err_note = (f" ({err} of the {sampled} sampled files returned no metadata and "
-                                f"were excluded, so counts are over {sampled - err} files.)"
-                                if err else "")
+                    cover_note = _coverage_note(tag_service, diag)
                     result = (f"Query '{content}' matched {result_count} files total, above the trs "
                               f"threshold {trs}, so here is a tag-count summary (showing the top "
                               f"{len(summary_result)} of {total_distinct} distinct tags by count)."
-                              f"{sample_note}{err_note} ")
+                              f"{sample_note}{cover_note} ")
                     return result + str(summary_result)
                 # under threshold → fall through to the per-file path with the sampled ids
                 file_ids = sample_ids
@@ -364,16 +378,15 @@ async def hydrus_get_tags(
         # Get tags using the existing get_tags function (with summary logic)
         if trs_int < len(file_ids):
             result_limit_int = safe_int_convert(result_limit, 150)
-            summary_result, err = get_tags_summary(
+            summary_result, diag = get_tags_summary(
                 client_obj, file_ids=file_ids, tag_service=tag_service)
             total_distinct = len(summary_result)
             if result_limit_int > 0 and total_distinct > result_limit_int:
                 summary_result = summary_result[:result_limit_int]
-            err_note = (f" ({err} of the {len(file_ids)} returned no metadata and were excluded, so "
-                        f"counts are over {len(file_ids) - err} files.)" if err else "")
+            cover_note = _coverage_note(tag_service, diag)
             result = (f"The {len(file_ids)} given file ids are above the trs threshold {trs}, so "
                       f"here is a tag-count summary (showing the top {len(summary_result)} of "
-                      f"{total_distinct} distinct tags by count).{err_note} ")
+                      f"{total_distinct} distinct tags by count).{cover_note} ")
             result = result + str(summary_result)
         else:
             data = get_tags(client_obj, file_ids=file_ids, tag_service=tag_service)
