@@ -81,27 +81,26 @@ def get_tags(client_obj: hydrus_api.Client, file_ids: list[int], tag_service: st
     MyDict: list[list[Any]] = []
 
     for i in range(0, len(file_ids), batch_size):
-        # Get current batch of file IDs (up to batch_size)
         batch_file_ids = file_ids[i : i + batch_size]
-
         try:
-            # Get metadata for this batch
             a = client_obj.get_file_metadata(file_ids=batch_file_ids)
-
-            # Process each item in the batch
-            for y in range(0, len(a)):  # type: ignore[arg-type]
-                try:
-                    metadata = a.get("metadata")
-                    tags = metadata[y]["tags"][f"{tag_service_key}"]["storage_tags"]["0"]
-                except Exception as e:
-                    tags = [f"Error processing file: {str(e)}"]
-
-                MyDict.append([batch_file_ids[y], tags])
-        except Exception:
-            # Add error information to results
+            metadata = a.get("metadata") or []
+        except Exception as e:
             for file_id in batch_file_ids:
-                if not any(existing[0] == file_id for existing in MyDict):
-                    MyDict.append([file_id, [f"Error processing file: {str(e)}"]])
+                MyDict.append([file_id, [f"(metadata fetch failed: {e})"]])
+            continue
+
+        # Iterate the actual per-file metadata list. (The old code looped `range(len(a))`,
+        # where `a` is the response WRAPPER — {"metadata": [...], "services": {...}} — so the
+        # bound was the key-count, not the file-count: it overshot into IndexError and dropped
+        # or mis-paired files. Each metadata item already carries its own file_id.)
+        for item in metadata:
+            file_id = item.get("file_id")
+            try:
+                tags = item["tags"][f"{tag_service_key}"]["storage_tags"]["0"]
+            except Exception:
+                tags = []   # no tags in this service (or unexpected shape) — show none, don't invent
+            MyDict.append([file_id, tags])
 
     return MyDict
 
@@ -115,35 +114,29 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
 
     # Process in batches of 3
     batch_size = 3
-    tag_counts = {}
+    tag_counts: dict[str, int] = {}
+    error_count = 0   # files we genuinely couldn't read — counted separately, NEVER folded in as a tag
 
     for i in range(0, len(file_ids), batch_size):
-        # Get current batch of file IDs (up to batch_size)
         batch_file_ids = file_ids[i:i + batch_size]
-
         try:
-            # Get metadata for this batch
             a = client_obj.get_file_metadata(file_ids=batch_file_ids)
-
-            # Process each item in the batch
-            for y in range(0, len(a)):
-                try:
-                    metadata = a.get("metadata")
-                    tags = metadata[y]["tags"][f"{tag_service_key}"]["storage_tags"]["0"]
-                except Exception as e:
-                    tags = [f"Error processing file: {str(e)}"]
-
-                if tags:
-                    for tag in tags:
-                        if tag in tag_counts:
-                            tag_counts[tag] += 1
-                        else:
-                            tag_counts[tag] = 1
+            metadata = a.get("metadata") or []
         except Exception:
-            # Add error information to counts
-            for file_id in batch_file_ids:
-                if not any(existing[0] == file_id for existing in tag_counts):
-                    tag_counts[f"Error processing file {file_id}"] = 1
+            error_count += len(batch_file_ids)
+            continue
+
+        # Iterate the per-file metadata list — NOT range(len(a)), where `a` is the response
+        # wrapper. That bound overshot into IndexError, whose "Error processing file: list index
+        # out of range" text was then laundered into tag_counts as a phantom tag.
+        for item in metadata:
+            try:
+                tags = item["tags"][f"{tag_service_key}"]["storage_tags"]["0"]
+            except Exception:
+                error_count += 1
+                continue
+            for tag in (tags or []):
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
 
     # Convert to list of [tag, count] pairs sorted by count (highest to lowest)
     result = [[tag, count] for tag, count in tag_counts.items()]
@@ -154,11 +147,13 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
         try:
             result_limit_int = int(result_limit)
             if result_limit_int > 0 and len(result) > result_limit_int:
-                return result[:result_limit_int]
+                result = result[:result_limit_int]
         except (ValueError, TypeError):
             pass
 
-    return result
+    # NOTE: now returns (rows, error_count). The error count is reported to the caller as text,
+    # not pretended to be a tag.
+    return result, error_count
 
 def parse_hydrus_tags(query, additional_tags=None):
             """Parse Hydrus query string into proper tag structure
