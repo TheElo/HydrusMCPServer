@@ -73,13 +73,18 @@ def get_service_key_by_name(client: hydrus_api.Client, service_name: str) -> str
     return None
 
 
-def _storage_tags(item, tag_service_key):
-    """Current ('0') storage tags for a service from a file_metadata item. Tolerant: a file that
-    simply has no current tags in this service — Hydrus omits the empty '0' status — yields []
-    rather than raising KeyError (which would otherwise get a perfectly-tagged-but-empty file
-    excused from the summary)."""
-    return (((item.get("tags") or {}).get(str(tag_service_key)) or {})
-            .get("storage_tags") or {}).get("0") or []
+def _file_tags(item, tag_service_key):
+    """A file's tags for a service from a file_metadata item. Hydrus keeps tags under two halves
+    — `storage_tags` (raw) and `display_tags` (siblings/parents applied, computed ASYNCHRONOUSLY)
+    — each split by status ('0' current, '1' pending, '2' deleted, ...). Reading only the fixed
+    `storage_tags['0']` silently drops freshly-imported files whose current storage/display
+    hasn't materialised yet (their tags are still pending, or display sync hasn't run). Prefer
+    current storage, then current display, then pending — so a file with tags in ANY of those is
+    counted. The 2,963 already-current files are unchanged (current storage stays primary)."""
+    svc = ((item.get("tags") or {}).get(str(tag_service_key)) or {})
+    storage = svc.get("storage_tags") or {}
+    display = svc.get("display_tags") or {}
+    return (storage.get("0") or display.get("0") or storage.get("1") or display.get("1") or [])
 
 
 def _fetch_metadata(client_obj, file_ids):
@@ -114,7 +119,7 @@ def get_tags(client_obj: hydrus_api.Client, file_ids: list[int], tag_service: st
         # or mis-paired files. Each metadata item already carries its own file_id.)
         for item in metadata:
             if isinstance(item, dict):
-                MyDict.append([item.get("file_id"), _storage_tags(item, tag_service_key)])
+                MyDict.append([item.get("file_id"), _file_tags(item, tag_service_key)])
 
     return MyDict
 
@@ -153,7 +158,7 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
             if not isinstance(item, dict):
                 continue
             counted += 1
-            tags = _storage_tags(item, svc_key)
+            tags = _file_tags(item, svc_key)
             if tags:
                 for tag in tags:
                     tag_counts[tag] = tag_counts.get(tag, 0) + 1
