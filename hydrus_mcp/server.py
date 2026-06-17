@@ -301,7 +301,8 @@ async def hydrus_get_tags(
                                    f" The distribution below is a SAMPLE over the first {sampled} of "
                                    f"{result_count} matching files — raise `limit` or set it to 0 for "
                                    f"the full set.")
-                    err_note = (f" ({err} of those files could not be read and were skipped.)"
+                    err_note = (f" ({err} of the {sampled} sampled files returned no metadata and "
+                                f"were excluded, so counts are over {sampled - err} files.)"
                                 if err else "")
                     result = (f"Query '{content}' matched {result_count} files total, above the trs "
                               f"threshold {trs}, so here is a tag-count summary (showing the top "
@@ -368,7 +369,8 @@ async def hydrus_get_tags(
             total_distinct = len(summary_result)
             if result_limit_int > 0 and total_distinct > result_limit_int:
                 summary_result = summary_result[:result_limit_int]
-            err_note = (f" ({err} files could not be read and were skipped.)" if err else "")
+            err_note = (f" ({err} of the {len(file_ids)} returned no metadata and were excluded, so "
+                        f"counts are over {len(file_ids) - err} files.)" if err else "")
             result = (f"The {len(file_ids)} given file ids are above the trs threshold {trs}, so "
                       f"here is a tag-count summary (showing the top {len(summary_result)} of "
                       f"{total_distinct} distinct tags by count).{err_note} ")

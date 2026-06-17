@@ -73,6 +73,20 @@ def get_service_key_by_name(client: hydrus_api.Client, service_name: str) -> str
     return None
 
 
+def _storage_tags(item, tag_service_key):
+    """Current ('0') storage tags for a service from a file_metadata item. Tolerant: a file that
+    simply has no current tags in this service — Hydrus omits the empty '0' status — yields []
+    rather than raising KeyError (which would otherwise get a perfectly-tagged-but-empty file
+    excused from the summary)."""
+    return (((item.get("tags") or {}).get(str(tag_service_key)) or {})
+            .get("storage_tags") or {}).get("0") or []
+
+
+def _fetch_metadata(client_obj, file_ids):
+    a = client_obj.get_file_metadata(file_ids=file_ids)
+    return a.get("metadata") or []
+
+
 def get_tags(client_obj: hydrus_api.Client, file_ids: list[int], tag_service: str = "all known tags") -> list[list[Any]]:
     tag_service_key = get_service_key_by_name(client_obj, tag_service)
 
@@ -83,24 +97,24 @@ def get_tags(client_obj: hydrus_api.Client, file_ids: list[int], tag_service: st
     for i in range(0, len(file_ids), batch_size):
         batch_file_ids = file_ids[i : i + batch_size]
         try:
-            a = client_obj.get_file_metadata(file_ids=batch_file_ids)
-            metadata = a.get("metadata") or []
-        except Exception as e:
-            for file_id in batch_file_ids:
-                MyDict.append([file_id, [f"(metadata fetch failed: {e})"]])
-            continue
+            metadata = _fetch_metadata(client_obj, batch_file_ids)
+        except Exception:
+            # One bad/invalid id can make get_file_metadata raise for the whole batch — retry each
+            # file alone so its batchmates aren't lost with it.
+            metadata = []
+            for fid in batch_file_ids:
+                try:
+                    metadata.extend(_fetch_metadata(client_obj, [fid]))
+                except Exception as e:
+                    MyDict.append([fid, [f"(unreadable: {e})"]])
 
         # Iterate the actual per-file metadata list. (The old code looped `range(len(a))`,
         # where `a` is the response WRAPPER — {"metadata": [...], "services": {...}} — so the
         # bound was the key-count, not the file-count: it overshot into IndexError and dropped
         # or mis-paired files. Each metadata item already carries its own file_id.)
         for item in metadata:
-            file_id = item.get("file_id")
-            try:
-                tags = item["tags"][f"{tag_service_key}"]["storage_tags"]["0"]
-            except Exception:
-                tags = []   # no tags in this service (or unexpected shape) — show none, don't invent
-            MyDict.append([file_id, tags])
+            if isinstance(item, dict):
+                MyDict.append([item.get("file_id"), _storage_tags(item, tag_service_key)])
 
     return MyDict
 
@@ -115,28 +129,35 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
     # Process in batches of 3
     batch_size = 3
     tag_counts: dict[str, int] = {}
-    error_count = 0   # files we genuinely couldn't read — counted separately, NEVER folded in as a tag
+    processed = 0   # files whose metadata we actually read (a file with no tags here STILL counts)
 
     for i in range(0, len(file_ids), batch_size):
         batch_file_ids = file_ids[i:i + batch_size]
         try:
-            a = client_obj.get_file_metadata(file_ids=batch_file_ids)
-            metadata = a.get("metadata") or []
+            metadata = _fetch_metadata(client_obj, batch_file_ids)
         except Exception:
-            error_count += len(batch_file_ids)
-            continue
+            # retry per-file so one bad id doesn't drop its two batchmates
+            metadata = []
+            for fid in batch_file_ids:
+                try:
+                    metadata.extend(_fetch_metadata(client_obj, [fid]))
+                except Exception:
+                    pass   # genuinely unreadable; surfaced via the processed-vs-total gap below
 
-        # Iterate the per-file metadata list — NOT range(len(a)), where `a` is the response
-        # wrapper. That bound overshot into IndexError, whose "Error processing file: list index
-        # out of range" text was then laundered into tag_counts as a phantom tag.
+        # Iterate the per-file metadata list. `_storage_tags` is tolerant: a file with no current
+        # tags in this service contributes nothing but is still counted as processed — it is NOT
+        # an error to be excused (the earlier KeyError-on-["0"] was silently dropping ~untagged
+        # files out of the denominator).
         for item in metadata:
-            try:
-                tags = item["tags"][f"{tag_service_key}"]["storage_tags"]["0"]
-            except Exception:
-                error_count += 1
+            if not isinstance(item, dict):
                 continue
-            for tag in (tags or []):
+            processed += 1
+            for tag in _storage_tags(item, tag_service_key):
                 tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+    # Files Hydrus never returned metadata for at all (e.g. deleted-but-still-indexed). An
+    # untagged file is NOT counted here — it was processed, it simply contributed no tags.
+    skipped = max(0, len(file_ids) - processed)
 
     # Convert to list of [tag, count] pairs sorted by count (highest to lowest)
     result = [[tag, count] for tag, count in tag_counts.items()]
@@ -151,9 +172,9 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
         except (ValueError, TypeError):
             pass
 
-    # NOTE: now returns (rows, error_count). The error count is reported to the caller as text,
-    # not pretended to be a tag.
-    return result, error_count
+    # Returns (rows, skipped) where skipped = files Hydrus returned no metadata for — reported as
+    # text, never as a tag.
+    return result, skipped
 
 def parse_hydrus_tags(query, additional_tags=None):
             """Parse Hydrus query string into proper tag structure
