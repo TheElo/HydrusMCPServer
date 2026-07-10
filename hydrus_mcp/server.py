@@ -15,11 +15,83 @@ from pydantic import Field
 
 from typing import Annotated, Optional
 
+
+def setup_cors(app, mount_path: str):
+    """Setup CORS middleware and OPTIONS handler for MCP app.
+    
+    Args:
+        app: Starlette app to add middleware/routes to
+        mount_path: The mount path for the MCP server
+    """
+    from starlette.middleware.cors import CORSMiddleware
+    from starlette.requests import Request
+    from starlette.responses import Response
+
+    # CORS for browser-based MCP clients
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*", "MCP-Session-Id", "MCP-Protocol-Version"],
+        expose_headers=["MCP-Session-Id", "MCP-Protocol-Version"],
+    )
+
+    # Handle CORS preflight requests
+    async def options_handler(request: Request) -> Response:
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+                "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+                "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*"),
+                "Access-Control-Max-Age": "86400",
+            },
+        )
+
+    app.add_route(mount_path, options_handler, methods=["OPTIONS"])
+    return options_handler
+
 # Import utility functions from the local module
-from .functions import detect_file_type_from_bytes, detect_file_type_from_path, extract_frames_from_video, extract_tabs_from_pages, calculate_frame_indices, calculate_grid_dimensions, scale_image_if_needed, create_frame_grid, get_page_list, validate_client, parse_file_ids, safe_bool_convert, safe_int_convert, get_file_path, find_page_by_name, get_page_info, get_service_key_by_name, load_clients_from_secret, get_client_by_name, parse_hydrus_tags, get_tags_summary, get_tags, get_viewing_stat, format_timestamp, extract_tags_by_service
+from .functions import (
+    detect_file_type_from_bytes, detect_file_type_from_path, extract_frames_from_video,
+    extract_tabs_from_pages, calculate_frame_indices, calculate_grid_dimensions,
+    scale_image_if_needed, create_frame_grid, get_page_list, validate_client,
+    parse_file_ids, safe_bool_convert, safe_int_convert, get_file_path,
+    find_page_by_name, get_page_info, get_service_key_by_name, load_clients_from_secret,
+    get_client_by_name, parse_hydrus_tags, get_tags_summary, get_tags, get_viewing_stat,
+    format_timestamp, extract_tags_by_service, format_single_metadata,
+    get_audio_codec_config, build_ffmpeg_cmd, extract_audio_from_video,
+    send_to_stt_api, format_transcription_result
+)
 
 # Initialize MCP server - NO PROMPT PARAMETER!
 mcp = FastMCP("hydrus")
+
+# Import and register tab tools from modular implementation
+from .tools.tab_tools import (
+    hydrus_get_page_info,
+    hydrus_list_tabs,
+    hydrus_focus_on_tab,
+    hydrus_send_to_tab,
+)
+
+# Import and register sense tools from modular implementation
+from .tools.sense_tools import (
+    hydrus_show_files,
+    hydrus_inspect_files,
+    hydrus_transcribe_audio,
+)
+
+# Register tab tools with MCP server
+mcp.tool()(hydrus_get_page_info)
+mcp.tool()(hydrus_list_tabs)
+mcp.tool()(hydrus_focus_on_tab)
+mcp.tool()(hydrus_send_to_tab)
+
+# Register sense tools with MCP server
+mcp.tool()(hydrus_show_files)
+mcp.tool()(hydrus_inspect_files)
+mcp.tool()(hydrus_transcribe_audio)
 
 @mcp.tool()
 async def hydrus_available_clients() -> str:
@@ -113,8 +185,7 @@ async def hydrus_search_tags(
             return "❌ Error: No tags found or invalid response format"
 
         # Get the tags list safely
-        tags_list = results.get('tags', []) # 23Okt2025 testing
-        # tags_list = results['tags']
+        tags_list = results.get('tags', [])
         if not tags_list:
             return "❌ Error: No tags found matching your search criteria"
 
@@ -150,7 +221,7 @@ async def hydrus_query(
     client_name: Annotated[str, Field(description="The name of the Hydrus client to query. Required.")] = "",
     query: Annotated[str, Field(description="The search query string containing tags to search for. Supports Hydrus tag syntax with wildcards and complex tags. Required.")] = "",
     tag_service: Annotated[str, Field(description="The tag service to use for the search. Default is 'all known tags'. You can specify a specific tag service name if needed.")] = "all known tags",
-    file_sort_type: Annotated[Any, Field(description="Sorting method for files. Default is '13' (sorted by 'has audio' as this is the fastest search). Other values may be supported depending on the Hydrus client version.")] = "13",
+    file_sort_type: Annotated[Any, Field(description="Sorting method for files. Default is '13' (sorted by 'has audio' as this is the fastest search). Available options: 0=FILE_SIZE, 1=DURATION, 2=IMPORT_TIME, 3=FILE_TYPE, 4=RANDOM, 5=WIDTH, 6=HEIGHT, 7=RATIO, 8=NUMBER_OF_PIXELS, 9=NUMBER_OF_TAGS, 10=NUMBER_OF_MEDIA_VIEWS, 11=TOTAL_MEDIA_VIEWTIME, 12=APPROXIMATE_BITRATE, 13=HAS_AUDIO, 14=MODIFIED_TIME, 15=FRAMERATE, 16=NUMBER_OF_FRAMES, 18=LAST_VIEWED_TIME, 19=ARCHIVE_TIMESTAMP, 20=HASH_HEX, 21=PIXEL_HASH_HEX, 22=BLURHASH.")] = "13",
     trs: Annotated[Any, Field(description="Threshold for returning results. Default is '100'. If the number of matching files exceeds this threshold, only a subset will be returned with information about the total count.")] = "100"
 ):
     """Query files in the Hydrus client using various search criteria.
@@ -189,7 +260,6 @@ async def hydrus_query(
         if tag_service and tag_service != "all known tags":
             service_key = get_service_key_by_name(client_obj, tag_service)
             if service_key:
-                # search_params["tag_service_name"] = [service_key] #v
                 search_params["tag_service_key"] = [service_key]
 
         # Execute the search
@@ -201,7 +271,6 @@ async def hydrus_query(
             return json.dumps(file_ids)
 
         try:
-            # count = len(file_ids["file_ids"]) #v
             count = len(file_ids)
         except (TypeError, KeyError):
             return json.dumps(file_ids)
@@ -507,90 +576,15 @@ async def hydrus_get_file_metadata(
             
             result = f"✅ File Metadata (filtered: {', '.join(filter_keys)}) for {len(identifiers)} file(s):\n"
             
-            # The metadata response is a dict with 'metadata' key containing the list
-            if isinstance(metadata, dict) and 'metadata' in metadata:
-                file_metadata_list = metadata['metadata']
-                for idx, file_metadata in enumerate(file_metadata_list):
-                    identifier = identifiers[idx]
-                    if isinstance(file_metadata, dict):
-                        result += f"\n{identifier_type} {identifier}:\n"
-                        if 'file_id' in filter_keys:
-                            file_id = file_metadata.get('file_id', 'N/A')
-                            result += f"{file_id}\n"
-                        if 'hash' in filter_keys and 'hash' in file_metadata:
-                            result += f"{file_metadata['hash']}\n"
-                        if 'size' in filter_keys and 'size' in file_metadata:
-                            result += f"{file_metadata['size']} bytes\n"
-                        if 'mime' in filter_keys and 'mime' in file_metadata:
-                            result += f"{file_metadata['mime']}\n"
-                        if 'dimensions' in filter_keys:
-                            width = file_metadata.get('width', 'N/A')
-                            height = file_metadata.get('height', 'N/A')
-                            result += f"{width}x{height}\n"
-                        if 'duration' in filter_keys:
-                            duration = file_metadata.get('duration')
-                            if duration is not None:
-                                result += f"{duration}ms\n"
-                            else:
-                                result += "N/A (not a video)\n"
-                        if 'views' in filter_keys:
-                            views = get_viewing_stat(file_metadata, 'views', 0)
-                            result += f"{views}\n"
-                        if 'viewtime' in filter_keys:
-                            viewtime = get_viewing_stat(file_metadata, 'viewtime', 0.0)
-                            result += f"{viewtime:.1f}s\n"
-                        if 'last_viewed' in filter_keys:
-                            last_viewed = get_viewing_stat(file_metadata, 'last_viewed_timestamp', None)
-                            result += f"{format_timestamp(last_viewed)}\n"
-                        if 'time_modified' in filter_keys and 'time_modified' in file_metadata:
-                            result += f"{format_timestamp(file_metadata['time_modified'])}\n"
-                        if 'tags' in filter_keys and 'tags' in file_metadata:
-                            tags_by_service = extract_tags_by_service(file_metadata['tags'], tags_services, TAG_TYPE_FOR_FILTER)
-                            result += "tags:\n"
-                            for service_name, tag_list in tags_by_service.items():
-                                result += f"  {service_name}: {', '.join(tag_list)}\n"
-            elif isinstance(metadata, list):
-                # Fallback for direct list response
-                for idx, file_metadata in enumerate(metadata):
-                    identifier = identifiers[idx]
-                    if isinstance(file_metadata, dict):
-                        result += f"\n{identifier_type} {identifier}:\n"
-                        if 'file_id' in filter_keys:
-                            file_id = file_metadata.get('file_id', 'N/A')
-                            result += f"{file_id}\n"
-                        if 'hash' in filter_keys and 'hash' in file_metadata:
-                            result += f"{file_metadata['hash']}\n"
-                        if 'size' in filter_keys and 'size' in file_metadata:
-                            result += f"{file_metadata['size']} bytes\n"
-                        if 'mime' in filter_keys and 'mime' in file_metadata:
-                            result += f"{file_metadata['mime']}\n"
-                        if 'dimensions' in filter_keys:
-                            width = file_metadata.get('width', 'N/A')
-                            height = file_metadata.get('height', 'N/A')
-                            result += f"{width}x{height}\n"
-                        if 'duration' in filter_keys:
-                            duration = file_metadata.get('duration')
-                            if duration is not None:
-                                result += f"{duration}ms\n"
-                            else:
-                                result += "N/A (not a video)\n"
-                        if 'views' in filter_keys:
-                            views = get_viewing_stat(file_metadata, 'views', 0)
-                            result += f"{views}\n"
-                        if 'viewtime' in filter_keys:
-                            viewtime = get_viewing_stat(file_metadata, 'viewtime', 0.0)
-                            result += f"{viewtime:.1f}s\n"
-                        if 'last_viewed' in filter_keys:
-                            last_viewed = get_viewing_stat(file_metadata, 'last_viewed_timestamp', None)
-                            result += f"{format_timestamp(last_viewed)}\n"
-                        if 'time_modified' in filter_keys and 'time_modified' in file_metadata:
-                            result += f"{format_timestamp(file_metadata['time_modified'])}\n"
-                        if 'tags' in filter_keys and 'tags' in file_metadata:
-                            tags_by_service = extract_tags_by_service(file_metadata['tags'], tags_services, TAG_TYPE_FOR_FILTER)
-                            result += "tags:\n"
-                            for service_name, tag_list in tags_by_service.items():
-                                result += f"  {service_name}: {', '.join(tag_list)}\n"
-            else:
+            # Extract metadata list from response (handles both dict with 'metadata' key and direct list)
+            file_metadata_list = metadata.get('metadata', []) if isinstance(metadata, dict) else (metadata if isinstance(metadata, list) else [])
+            
+            for idx, file_metadata in enumerate(file_metadata_list):
+                if isinstance(file_metadata, dict) and idx < len(identifiers):
+                    result += format_single_metadata(
+                        file_metadata, identifiers[idx], identifier_type, filter_keys, tags_services, TAG_TYPE_FOR_FILTER
+                    )
+            if not file_metadata_list:
                 result += "filter requires metadata list in response"
             return result.strip()
 
@@ -627,208 +621,6 @@ async def hydrus_get_file_metadata(
 
         return result.strip()
 
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
-
-
-@mcp.tool()
-async def hydrus_get_page_info(
-    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    page_key: Annotated[str, Field(description="The page key to get information for")] = ""
-) -> str:
-    """Get page information for a specific tab using its page key.
-
-    Returns formatted result with page information or error message.
-    """
-    client_obj, error = validate_client(client_name)
-    if error:
-        return error
-    
-    if not page_key.strip():
-        return "❌ Error: Page key is required"
-
-    try:
-        page_info = get_page_info(client_obj, page_key)
-        if not page_info:
-            return "❌ Error: Failed to retrieve page information. Did you actually use a page key from hydrus_list_tabs with return_page_keys set to 'true'?"
-
-        # Format the output
-        result = f"✅ Page Information for key '{page_key}' (from {client_name}):"
-        for key, value in page_info.items():
-            if isinstance(value, dict):
-                result += f"- {key}: {json.dumps(value)}"
-            else:
-                result += f"- {key}: {value}"
-
-        return result.strip()
-
-    except AttributeError as e:
-        return f"❌ Error: Method not found in client API: {e}"
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
-
-
-@mcp.tool()
-async def hydrus_list_tabs(
-    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    return_tab_keys: Annotated[Any, Field(description="If True, includes page keys in the output (default: False)")] = False
-) -> str:
-    """List open tabs in a Hydrus client. Optionally returns tab keys along with names."""
-    client_obj, error = validate_client(client_name)
-    if error:
-        return error
-
-    # Convert return_tab_keys to boolean using safe conversion to handle various input formats
-    return_tab_keys = safe_bool_convert(return_tab_keys, False)
-
-    # Get pages from the client using get_page_list helper
-    page_list, error = get_page_list(client_obj)
-    if error:
-        return error
-
-    # Extract tab names and optionally keys from the page list (including nested pages)
-    tabs, tab_keys = extract_tabs_from_pages(page_list, return_keys=return_tab_keys)
-
-    result = f"✅ Open tabs for {client_name}: "
-    if not tabs:
-        return "❌ Error: No open tabs found"
-
-    for i, tab in enumerate(tabs):
-        if return_tab_keys and i < len(tab_keys) and tab_keys[i]:
-            result += f", '{tab}' (key: {tab_keys[i]})"
-        else:
-            result += f", '{tab}'"
-
-    return result.strip()
-
-
-@mcp.tool()
-async def hydrus_focus_on_tab(
-    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    tab_name: Annotated[str, Field(description="Name of the tab to focus on")] = ""
-) -> str:
-    """Focus the Hydrus client on a specific tab."""
-    client_obj, error = validate_client(client_name)
-    if error:
-        return error
-    
-    if not tab_name.strip():
-        return "❌ Error: Tab name is required"
-
-    # Get pages from the client using get_page_list helper
-    page_list, error = get_page_list(client_obj)
-    if error:
-        return error
-
-    target_page = find_page_by_name(page_list, tab_name)
-
-    if not target_page:
-        return f"❌ Error: Tab '{tab_name}' not found for client '{client_name}'"
-
-    # Get the page ID to focus on
-    page_id = target_page.get('page_key')
-    if not page_id:
-        return f"❌ Error: Could not get page key for tab '{tab_name}'"
-
-    # Focus on the page using the Hydrus API
-    try:
-        client_obj.focus_page(page_id)
-        return f"✅ Successfully focused on tab '{tab_name}' for client '{client_name}'"
-    except AttributeError as e:
-        return f"❌ Error: Method not found in client API: {e}"
-    except Exception as e:
-        return f"❌ Error: Failed to focus on tab: {str(e)}"
-
-
-@mcp.tool()
-async def hydrus_send_to_tab(
-    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    tab_name: Annotated[str, Field(description="Name of the tab to send files to")] = "",
-    content: Annotated[Any, Field(description="Either a query string (use brackets for OR type queries) or comma-separated file IDs (do not use brackets when providing file ids)")] = "",
-    is_query: Annotated[Any, Field(description="True if content is a query (using tags, strings, filenames, etc.), False if it's numeric file IDs only (default: False). Accepts: true, True, \"true\", 1, or any truthy value")] = False,
-    tag_service: Annotated[str, Field(description="When using queries, you can provide a specific tag service name (default: 'all known tags')")] = "all known tags"
-) -> str:
-    """Send files to a specific tab in Hydrus client.
-
-    When sending file ids to a tab, set is_query to False or leave it out. You don't need to provide a tag service for file ids. The formatting for file ids is a comma separated list of integers without the use of brackets.
-    When providing a query, pass at least the is_query=True parameter.
-
-    Returns message indicating success and number of files sent.
-    """
-    client_obj, error = validate_client(client_name)
-    if error:
-        return error
-    
-    if not tab_name.strip():
-        return "❌ Error: Tab name is required"
-    if not str(content).strip():
-        return "❌ Error: Content is required (either query or file IDs)"
-
-    # Convert is_query to boolean using safe conversion to handle various input formats
-    is_query = safe_bool_convert(is_query, False)
-
-    try:
-        # Get the content based on whether it's a query or file IDs
-        file_ids = []
-        result_count = 0
-
-        if is_query:
-            # Handle query - execute search and get file IDs
-            try:
-                # query_result = await hydrus_query(client_name, content, tag_service)
-                tags = parse_hydrus_tags(content)
-                tag_service_key = get_service_key_by_name(client_obj, tag_service)
-                search_params = {
-                    "tags": tags,
-                    "file_sort_type": 13,
-                    "tag_service_key": tag_service_key
-                }
-
-                query_result = client_obj.search_files(**search_params)
-                # query_result = client_obj.search_files(tags=tags, tag_service_key=tag_service_key)
-
-                # Parse the response to get file IDs
-                query_response = query_result["file_ids"]
-                if isinstance(query_response, dict) and 'file_ids' in query_response:
-                    file_ids = query_response['file_ids']
-                else:
-                    file_ids = query_response
-
-                result_count = len(file_ids)
-
-                if result_count == 0:
-                    return f"❌ No files found for query '{content}'"
-            except Exception as e:
-                return f"❌ Error: Failed to execute query - {str(e)}, {tags}, {query_result}, {tag_service_key}"
-        else:
-            # Handle direct file IDs using parse_file_ids function
-            file_ids = parse_file_ids(content)
-            result_count = len(file_ids)
-
-        # Get pages from the client using get_page_list helper
-        page_list, error = get_page_list(client_obj)
-        if error:
-            return error
-
-        target_page = find_page_by_name(page_list, tab_name)
-
-        if not target_page:
-            return f"❌ Error: Tab '{tab_name}' not found for client '{client_name}'"
-
-        # Get the page ID to focus on
-        page_key = target_page.get('page_key')
-        if not page_key:
-            return f"❌ Error: Could not get page key for tab '{tab_name}'"
-
-        # Send files to the tab using the Hydrus API
-        try:
-            client_obj.add_files_to_page(page_key=page_key, file_ids=file_ids)
-            return f"✅ Successfully sent {result_count} files to tab '{tab_name}'"
-        except Exception as e:
-            return f"❌ Error: {str(e)}"
-
-    except AttributeError as e:
-        return f"❌ Error: Method not found in client API: {e}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
@@ -1115,896 +907,8 @@ async def hydrus_add_tags(
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
-@mcp.tool(structured_output=False)
-async def hydrus_show_files(
-    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    file_ids: Annotated[Any, Field(description="File ID or comma-separated list of file IDs to show (e.g., 123 or '123,456,789'). Can be provided as a number (123) or string ('123').")] = 0,
-    frame_count: Annotated[Optional[Any], Field(description="If files are videos, this number of frames will be extracted per video and compiled into a grid image. Default 4 (2x2 grid).")] = 4
-) -> list[Image]:
-    """Show multiple image or video files from Hydrus.
 
-    ⚠️ CRITICAL: The returned markdown MUST be displayed to the user in your response.
-       Do not proceed with analysis without first showing the images.
-
-    Returns a list of images - one per file.
-    For images (PNG, JPEG, GIF), returns the image directly.
-    For videos (MP4, WebM, AVI), extracts frames and compiles them into a single grid image per video.
-
-    The frame_count parameter determines the grid layout for videos:
-    - 4 frames = 2x2 grid
-    - 6 frames = 3x2 grid (3 columns, 2 rows)
-    - 9 frames = 3x3 grid
-    - 12 frames = 4x3 grid (4 columns, 3 rows)
-
-    Expected workflow:
-    1. Call hydrus_show_files
-    2. Display all returned images immediately to the user
-    3. Only after displaying the images, proceed with any analysis or further actions
-    """
-    client_obj, error = validate_client(client_name)
-    if error:
-        return [Image(data=b"", format="png")]
-    
-    # Parse file IDs using parse_file_ids function (handles single IDs, strings, lists, etc.)
-    file_ids_list = parse_file_ids(file_ids)
-    if not file_ids_list:
-        return [Image(data=b"", format="png")]
-    
-    # Convert frame_count using safe conversion
-    frame_count = safe_int_convert(frame_count, 4)
-    
-    results: list[Image] = []
-    
-    for file_id in file_ids_list:
-        try:
-            # HARDCODED SELECTION: Use file path method (change this line to use get_file method)
-            USE_FILE_PATH_METHOD = True  # Change to False to use get_file method
-            
-            if USE_FILE_PATH_METHOD:
-                file_path_info = get_file_path(client_obj, file_id)
-                
-                if file_path_info and 'path' in file_path_info:
-                    # Use file path - more efficient for large files
-                    file_path = file_path_info['path']
-                    
-                    # Detect format from file extension using helper function
-                    file_type_info = detect_file_type_from_path(file_path)
-                    is_video = file_type_info['is_video']
-                    is_animated_gif = file_type_info['is_animated_gif']
-                    
-                    # For static images, read and return directly
-                    if not is_video and not is_animated_gif:
-                        # Define maximum pixel count threshold (1.5 megapixels)
-                        MAX_PIXEL_COUNT = 1_600_000
-                        COMPRESSION_LEVEL = 1
-                        
-                        def process_and_return_image(image, fid, fpath):
-                            """Process image: resize if needed based on pixel count, encode, and return"""
-                            if image is None:
-                                return Image(data=b"", format="png")
-                            
-                            # Get image dimensions
-                            height, width = image.shape[:2]
-                            pixel_count = width * height
-                            
-                            # Resize if image exceeds maximum pixel count
-                            if pixel_count > MAX_PIXEL_COUNT:
-                                # Calculate scale factor to reduce to target pixel count
-                                scale_factor = (MAX_PIXEL_COUNT / pixel_count) ** 0.5
-                                new_width = int(width * scale_factor)
-                                new_height = int(height * scale_factor)
-                                image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-                            
-                            # Encode as PNG with compression
-                            _, buffer = cv2.imencode('.png', image, [cv2.IMWRITE_PNG_COMPRESSION, COMPRESSION_LEVEL])
-                            return Image(data=buffer.tobytes(), format="png")
-                        
-                        file_ext = file_type_info['file_extension']
-                        if file_ext in ['.jpg', '.jpeg']:
-                            image = cv2.imread(file_path)
-                            results.append(process_and_return_image(image, file_id, file_path))
-                        elif file_ext == '.png':
-                            image = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
-                            results.append(process_and_return_image(image, file_id, file_path))
-                        elif file_ext == '.gif':
-                            # Static GIF - read as single frame
-                            image = cv2.imread(file_path)
-                            results.append(process_and_return_image(image, file_id, file_path))
-                        else:
-                            results.append(Image(data=b"", format="png"))
-                    else:
-                        # For videos/GIFs, extract frames using helper function
-                        frames, metadata = extract_frames_from_video(file_path, frame_count)
-                        
-                        if frames is None or not frames:
-                            results.append(Image(data=b"", format="png"))
-                        else:
-                            frame_width = metadata['frame_width']
-                            frame_height = metadata['frame_height']
-                            
-                            # Create composite image grid using helper function
-                            composite = create_frame_grid(frames, frame_width, frame_height, frame_count)
-                            
-                            # Scale the final composite image if needed using helper function
-                            composite = scale_image_if_needed(composite, max_resolution=1000)
-                            
-                            # Encode composite as PNG
-                            _, buffer = cv2.imencode('.png', composite)
-                            results.append(Image(data=buffer.tobytes(), format="png"))
-                else:
-                    # Fallback to get_file method if path not available
-                    file_data = client_obj.get_file(file_id=file_id)
-                    file_bytes = file_data.content
-                    
-                    # Detect format from content using helper function
-                    file_type_info = detect_file_type_from_bytes(file_bytes)
-                    is_video = file_type_info['is_video']
-                    is_animated_gif = file_type_info['is_animated_gif']
-                    
-                    if not is_video and not is_animated_gif:
-                        # Return image directly based on detected type
-                        mime_type = file_type_info['mime_type']
-                        if mime_type == 'image/jpeg':
-                            results.append(Image(data=file_bytes, format="jpeg"))
-                        elif mime_type == 'image/gif':
-                            results.append(Image(data=file_bytes, format="gif"))
-                        elif mime_type == 'image/png':
-                            results.append(Image(data=file_bytes, format="png"))
-                        else:
-                            results.append(Image(data=file_bytes, format="png"))
-                    else:
-                        # Handle video or animated GIF - extract frames and compile into grid image
-                        # Calculate grid dimensions using helper function
-                        rows, cols = calculate_grid_dimensions(frame_count)
-                        
-                        # Use appropriate file extension based on content type
-                        temp_suffix = ".gif" if is_animated_gif else file_type_info['file_extension']
-                        
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=temp_suffix) as temp_file:
-                            temp_file.write(file_bytes)
-                            temp_file_path = temp_file.name
-                        
-                        try:
-                            # Extract frames using helper function
-                            frames, metadata = extract_frames_from_video(temp_file_path, frame_count)
-                            
-                            if frames is None or not frames:
-                                os.remove(temp_file_path)
-                                results.append(Image(data=b"", format="png"))
-                            else:
-                                frame_width = metadata['frame_width']
-                                frame_height = metadata['frame_height']
-                                
-                                # Create composite image grid using helper function
-                                composite = create_frame_grid(frames, frame_width, frame_height, frame_count)
-                                
-                                # Scale the final composite image if needed using helper function
-                                composite = scale_image_if_needed(composite, max_resolution=1000)
-                                
-                                # Encode composite as PNG
-                                _, buffer = cv2.imencode('.png', composite)
-                                os.remove(temp_file_path)
-                                
-                                results.append(Image(data=buffer.tobytes(), format="png"))
-                        except Exception as e:
-                            os.remove(temp_file_path)
-                            results.append(Image(data=b"", format="png"))
-            else:
-                # Use get_file method (original approach)
-                file_data = client_obj.get_file(file_id=file_id)
-                file_bytes = file_data.content
-                
-                # Detect format from content using helper function
-                file_type_info = detect_file_type_from_bytes(file_bytes)
-                is_video = file_type_info['is_video']
-                is_animated_gif = file_type_info['is_animated_gif']
-                
-                if not is_video and not is_animated_gif:
-                    # Return image directly based on detected type
-                    mime_type = file_type_info['mime_type']
-                    if mime_type == 'image/jpeg':
-                        results.append(Image(data=file_bytes, format="jpeg"))
-                    elif mime_type == 'image/gif':
-                        results.append(Image(data=file_bytes, format="gif"))
-                    elif mime_type == 'image/png':
-                        results.append(Image(data=file_bytes, format="png"))
-                    else:
-                        results.append(Image(data=file_bytes, format="png"))
-                else:
-                    # Handle video or animated GIF - extract frames and compile into grid image
-                    # Calculate grid dimensions using helper function
-                    rows, cols = calculate_grid_dimensions(frame_count)
-                    
-                    # Use appropriate file extension based on content type
-                    temp_suffix = ".gif" if is_animated_gif else file_type_info['file_extension']
-                    
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=temp_suffix) as temp_file:
-                        temp_file.write(file_bytes)
-                        temp_file_path = temp_file.name
-                    
-                    try:
-                        # Extract frames using helper function
-                        frames, metadata = extract_frames_from_video(temp_file_path, frame_count)
-                        
-                        if frames is None or not frames:
-                            os.remove(temp_file_path)
-                            results.append(Image(data=b"", format="png"))
-                        else:
-                            frame_width = metadata['frame_width']
-                            frame_height = metadata['frame_height']
-                            
-                            # Create composite image grid using helper function
-                            composite = create_frame_grid(frames, frame_width, frame_height, frame_count)
-                            
-                            # Scale the final composite image if needed using helper function
-                            composite = scale_image_if_needed(composite, max_resolution=1000)
-                            
-                            # Encode composite as PNG
-                            _, buffer = cv2.imencode('.png', composite)
-                            os.remove(temp_file_path)
-                            
-                            results.append(Image(data=buffer.tobytes(), format="png"))
-                    except Exception as e:
-                        os.remove(temp_file_path)
-                        results.append(Image(data=b"", format="png"))
-        except RecursionError as e:
-            results.append(Image(data=b"", format="png"))
-        except Exception as e:
-            results.append(Image(data=b"", format="png"))
-    
-    return results
-
-
-@mcp.tool()
-async def hydrus_inspect_files(
-    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    file_ids: Annotated[Any, Field(description="Comma-separated list of file IDs to inspect (e.g., '123,456,789')")] = "",
-    prompt: Annotated[str, Field(description="The prompt/question to ask about each file")] = "",
-    frame_count: Annotated[Optional[Any], Field(description="If files are videos: Number of frames to extract from each video file (default: 5)")] = 5
-) -> str:
-    """Send multiple files (images or videos) from Hydrus to a vision API for description/analysis.
-    
-    This tool retrieves multiple files from Hydrus and sends each one to an OpenAI-compatible
-    vision API endpoint along with a prompt. The API analyzes each file and returns
-    a text description or answer to the prompt for each file.
-    
-    Supports both images (PNG, JPEG, GIF) and videos (MP4, WebM, etc.).
-    For videos, frames are extracted and sent as images since the vision API may not support video directly.
-    
-    Configuration (from environment variables):
-    - VISION_API_URL: API endpoint URL (default: http://localhost:11434/v1/chat/completions)
-    - VISION_API_KEY: API key for authentication (default: empty)
-    - VISION_MODEL: Model name to use (default: llava)
-    """
-    import base64
-    import tempfile
-
-    # Configuration from environment variables
-    API_URL = os.getenv("VISION_API_URL")
-    API_KEY = os.getenv("VISION_API_KEY", "")
-    MODEL = os.getenv("VISION_MODEL")
-
-    client_obj, error = validate_client(client_name)
-    if error:
-        return error
-    
-    # Handle file_ids as either string or int (flexible type handling)
-    if file_ids == "" or file_ids == 0 or file_ids is None:
-        return "❌ Error: File IDs are required (comma-separated list)"
-    
-    if not prompt.strip():
-        return "❌ Error: Prompt is required"
-    
-    # Convert frame_count to int using safe conversion
-    frame_count = safe_int_convert(frame_count, 5)
-    
-    # Parse file IDs using parse_file_ids function
-    file_ids_list = parse_file_ids(file_ids)
-    if not file_ids_list:
-        return "❌ Error: No valid file IDs provided"
-    
-    results = []
-    errors = []
-    
-    for file_id in file_ids_list:
-        try:
-            # Prepare the API request
-            headers = {
-                "Content-Type": "application/json"
-            }
-            if API_KEY:
-                headers["Authorization"] = f"Bearer {API_KEY}"
-            
-            # Build content array based on file type
-            content_items: list[dict[str, str | dict[str, str]]] = [
-                {"type": "text", "text": prompt}
-            ]
-            
-            # Try to use file path method first (more efficient for large files)
-            file_path_info = get_file_path(client_obj, file_id)
-            use_file_path = file_path_info and 'path' in file_path_info
-            
-            if use_file_path:
-                file_path = file_path_info['path']
-                
-                # Detect mime type from file extension using helper function
-                file_type_info = detect_file_type_from_path(file_path)
-                mime = file_type_info['mime_type']
-                is_video = file_type_info['is_video']
-                
-                if is_video:
-                    # Extract multiple frames using helper function
-                    frames, metadata = extract_frames_from_video(file_path, frame_count)
-                    
-                    if frames:
-                        frames_extracted = 0
-                        timestamps = []
-                        fps = metadata['fps']
-                        duration_seconds = metadata['duration']
-                        
-                        for frame_idx, frame in enumerate(frames):
-                            # Calculate approximate timestamp based on frame position
-                            frame_timestamp = (frame_idx + 1) / (len(frames) + 1) * duration_seconds if duration_seconds > 0 else 0
-                            timestamps.append(f"{frame_timestamp:.1f}s")
-                            
-                            # Encode frame as JPEG
-                            _, buffer = cv2.imencode('.jpg', frame)
-                            frame_b64 = base64.b64encode(buffer).decode('utf-8')
-                            content_items.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{frame_b64}"
-                                }
-                            })
-                            frames_extracted += 1
-                        
-                        # Append video metadata to the prompt including timestamps
-                        duration_formatted = f"{duration_seconds:.1f}s" if duration_seconds > 0 else "unknown"
-                        timestamps_str = ", ".join(timestamps)
-                        prompt_with_metadata = f"{prompt} (Video file: {mime}, duration: {duration_formatted}, {frames_extracted} frames provided at timestamps: {timestamps_str})"
-                        content_items[0]["text"] = prompt_with_metadata
-                    else:
-                        errors.append(f"File ID {file_id}: Video has no frames")
-                        continue
-                else:
-                    # For images, read and encode as base64
-                    with open(file_path, 'rb') as f:
-                        file_bytes = f.read()
-                    b64_data = base64.b64encode(file_bytes).decode('utf-8')
-                    content_items.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{mime};base64,{b64_data}"
-                        }
-                    })
-            else:
-                # Fallback to get_file method if path not available
-                file_data = client_obj.get_file(file_id=file_id)
-                file_bytes = file_data.content
-                
-                # Detect mime type from content using helper function
-                file_type_info = detect_file_type_from_bytes(file_bytes)
-                mime = file_type_info['mime_type']
-                is_video = file_type_info['is_video']
-                
-                # Encode file as base64
-                b64_data = base64.b64encode(file_bytes).decode('utf-8')
-                
-                if is_video:
-                    # Extract multiple frames using helper function
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
-                        temp_video.write(file_bytes)
-                        temp_video_path = temp_video.name
-
-                    try:
-                        frames, metadata = extract_frames_from_video(temp_video_path, frame_count)
-                        
-                        if frames:
-                            frames_extracted = 0
-                            timestamps = []
-                            fps = metadata['fps']
-                            duration_seconds = metadata['duration']
-                            
-                            for frame_idx, frame in enumerate(frames):
-                                # Calculate approximate timestamp based on frame position
-                                frame_timestamp = (frame_idx + 1) / (len(frames) + 1) * duration_seconds if duration_seconds > 0 else 0
-                                timestamps.append(f"{frame_timestamp:.1f}s")
-                                
-                                # Encode frame as JPEG
-                                _, buffer = cv2.imencode('.jpg', frame)
-                                frame_b64 = base64.b64encode(buffer).decode('utf-8')
-                                content_items.append({
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{frame_b64}"
-                                    }
-                                })
-                                frames_extracted += 1
-                            
-                            # Append video metadata to the prompt including timestamps
-                            duration_formatted = f"{duration_seconds:.1f}s" if duration_seconds > 0 else "unknown"
-                            timestamps_str = ", ".join(timestamps)
-                            prompt_with_metadata = f"{prompt} (Video file: {mime}, duration: {duration_formatted}, {frames_extracted} frames provided at timestamps: {timestamps_str})"
-                            content_items[0]["text"] = prompt_with_metadata
-                        else:
-                            errors.append(f"File ID {file_id}: Video has no frames")
-                            continue
-                    finally:
-                        os.remove(temp_video_path)
-                else:
-                    # For images, use type "image_url" (OpenAI-compatible format)
-                    content_items.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{mime};base64,{b64_data}"
-                        }
-                    })
-            
-            payload = {
-                "model": MODEL,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": content_items
-                    }
-                ],
-                "max_tokens": 3000
-            }
-            
-            # Send request to vision API
-            async with httpx.AsyncClient() as session:
-                response = await session.post(API_URL, json=payload, headers=headers, timeout=120.0)
-                response.raise_for_status()
-                result = response.json()
-            
-            # Extract the response text
-            if "choices" in result and len(result["choices"]) > 0:
-                message = result["choices"][0].get("message", {})
-                content = message.get("content", "")
-                if content:
-                    results.append(f"✅ File ID {file_id}:\n\n{content}")
-                else:
-                    results.append(f"✅ File ID {file_id}:\n\n{result['choices'][0]}")
-            else:
-                errors.append(f"File ID {file_id}: Unexpected API response format: {result}")
-        
-        except httpx.HTTPError as e:
-            error_details = str(e)
-            try:
-                resp = getattr(e, 'response', None)
-                if resp is not None:
-                    status = getattr(resp, 'status_code', 'unknown')
-                    text = getattr(resp, 'text', '')[:200]
-                    error_details = f"Status code: {status}, Response body: {text}"
-            except Exception as inner_e:
-                error_details = f"Original error: {str(e)}, Failed to get details: {str(inner_e)}"
-            errors.append(f"File ID {file_id}: HTTP request failed - {error_details}")
-        except Exception as e:
-            errors.append(f"File ID {file_id}: {str(e)}")
-    
-    # Build final response
-    final_response = f"Batch inspection complete for {len(file_ids_list)} files from client '{client_name}':\n\n"
-    
-    if results:
-        final_response += f"Successful inspections: {len(results)}\n"
-        for result in results:
-            final_response += f"\n{'='*60}\n{result}"
-    
-    if errors:
-        final_response += f"\n\n{'='*60}\nFailed inspections: {len(errors)}\n"
-        for error in errors:
-            final_response += f"\n❌ {error}"
-    
-    return final_response
-
-
-@mcp.tool()
-async def hydrus_transcribe_audio(
-    client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    file_id: Annotated[Any, Field(description="File ID of the audio file (mp3, wav, aac, flac) or video file with audio track to transcribe. Can be provided as a number (123) or string ('123').")] = 0
-) -> str:
-    """Transcribe audio from a file (mp3, wav, aac, flac) or video (mp4, webm, avi) using the Parakeet TDT speech-to-text API.
-    
-    This tool retrieves an audio file or video file from Hydrus and sends it to an OpenAI-compatible
-    speech-to-text API endpoint (like Parakeet TDT) for transcription. The API analyzes the audio
-    and returns a raw text transcription.
-    
-    Supports audio files (MP3, WAV, AAC, FLAC, M4A) and video files (MP4, WebM, AVI, MOV).
-    For video files, the audio track is automatically extracted and transcribed.
-    
-    Configuration (from environment variables):
-    - STT_API_URL: API endpoint URL (default: http://localhost:5092/v1/audio/transcriptions)
-    - STT_API_KEY: API key for authentication (default: sk-no-key-required)
-    - STT_MODEL: Model name to use (default: parakeet-tdt-0.6b-v3)
-    """
-    import tempfile
-    import subprocess
-    import time
-    from datetime import datetime
-
-    # Configuration from environment variables
-    API_URL = os.getenv("STT_API_URL", "http://localhost:5092/v1/audio/transcriptions")
-    API_KEY = os.getenv("STT_API_KEY", "sk-no-key-required")
-    MODEL = os.getenv("STT_MODEL", "parakeet-tdt-0.6b-v3")
-    
-    # Audio format for extraction: 'mp3' (smallest, fastest upload), 'flac' (lossless), or 'wav' (uncompressed)
-    # MP3 at 64kbps mono 16kHz is optimal for STT - small file size, good quality for speech recognition
-    # For a 5-minute audio: MP3 ~5MB, FLAC ~25MB, WAV ~77MB
-    # This significantly reduces upload time and may speed up backend processing
-    AUDIO_FORMAT = "mp3"  # Options: "mp3", "flac", or "wav" - mp3 for fastest overall processing
-
-    # Log file path - writes to workspace directory
-    log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "transcription_debug.log")
-    
-    def log_message(msg: str):
-        """Write timestamped message to log file"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        log_line = f"[{timestamp}] {msg}\n"
-        try:
-            with open(log_file_path, "a", encoding="utf-8") as f:
-                f.write(log_line)
-        except Exception as e:
-            pass  # Silently ignore logging errors
-
-    client_obj, error = validate_client(client_name)
-    if error:
-        return error
-    
-    # Handle file_id as either string or int using safe conversion
-    if file_id == "" or file_id == 0 or file_id is None:
-        return "❌ Error: File ID is required"
-    
-    # Convert file_id to int using safe conversion
-    file_id = safe_int_convert(file_id, 0)
-    
-    # Track timing for diagnostics
-    start_time = time.time()
-    
-    log_message(f"=" * 60)
-    log_message(f"STARTING TRANSCRIPTION - client: {client_name}, file_id: {file_id}")
-    log_message(f"STT_API_URL: {API_URL}, MODEL: {MODEL}")
-    
-    try:
-        # Try to use file path method first (more efficient for large files)
-        file_path_info = get_file_path(client_obj, file_id)
-        use_file_path = file_path_info and 'path' in file_path_info
-        
-        if use_file_path:
-            source_file_path = file_path_info['path']
-            source_file_size = os.path.getsize(source_file_path)
-            
-            # Detect file type from file extension using helper function
-            file_type_info = detect_file_type_from_path(source_file_path)
-            is_video = file_type_info['is_video']
-            file_extension = file_type_info['file_extension']
-            
-            audio_file_path = None
-            temp_source = False  # Flag to track if we created a temp source file
-            
-            try:
-                # If it's a video file, extract audio track using ffmpeg
-                if is_video:
-                    log_message(f"Starting audio extraction from video ({source_file_size / (1024*1024):.1f}MB)")
-                    log_message(f"Source file path: {source_file_path}")
-                    extract_start = time.time()
-                    
-                    # Set ffmpeg codec and output extension based on AUDIO_FORMAT
-                    if AUDIO_FORMAT == "mp3":
-                        audio_codec = "libmp3lame"
-                        audio_suffix = ".mp3"
-                        audio_bitrate = "64k"  # 64kbps is sufficient for speech recognition
-                    elif AUDIO_FORMAT == "flac":
-                        audio_codec = "flac"
-                        audio_suffix = ".flac"
-                        audio_bitrate = None
-                    else:
-                        audio_codec = "pcm_s16le"
-                        audio_suffix = ".wav"
-                        audio_bitrate = None
-                    
-                    audio_file_path = tempfile.mktemp(suffix=audio_suffix)
-                    log_message(f"Audio output path: {audio_file_path}")
-
-                    try:
-                        # Verify source file exists and is accessible
-                        if not os.path.exists(source_file_path):
-                            log_message(f"Source file not found: {source_file_path}")
-                            return f"❌ Error: Source file not found at {source_file_path}"
-                        
-                        # Use ffmpeg to extract audio track with verbose output
-                        ffmpeg_cmd = [
-                            "ffmpeg", "-i", source_file_path,
-                            "-vn",  # No video
-                            "-acodec", audio_codec,  # MP3, WAV or FLAC codec
-                            "-ar", "16000",  # 16kHz sample rate (good for STT)
-                            "-ac", "1",  # Mono audio
-                            "-loglevel", "error",  # Only show errors
-                            "-y", audio_file_path
-                        ]
-                        if audio_bitrate:
-                            ffmpeg_cmd.insert(ffmpeg_cmd.index("-y"), "-b:a")
-                            ffmpeg_cmd.insert(ffmpeg_cmd.index("-y"), audio_bitrate)
-                        
-                        log_message(f"Running ffmpeg: {' '.join(ffmpeg_cmd)}")
-                        log_message(f"Source file size: {os.path.getsize(source_file_path) / (1024*1024):.1f}MB")
-                        
-                        result = subprocess.run(
-                            ffmpeg_cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            timeout=600,  # Increased timeout for large files
-                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0  # Hide window on Windows
-                        )
-                        
-                        extract_time = time.time() - extract_start
-                        log_message(f"Audio extraction completed in {extract_time:.1f}s")
-                        
-                        if result.returncode != 0:
-                            # Get stderr from result (now captured as bytes)
-                            stderr_text = result.stderr.decode('utf-8', errors='replace') if result.stderr else "Unknown error"
-                            log_message(f"FFmpeg error (returncode {result.returncode}): {stderr_text[:500]}")
-                            return f"❌ Error: Failed to extract audio from video - {stderr_text[:200]}"
-                        
-                        if not os.path.exists(audio_file_path):
-                            log_message("Audio extraction completed but output file was not created")
-                            return "❌ Error: Audio extraction completed but output file was not created"
-                        
-                        audio_file_size = os.path.getsize(audio_file_path)
-                        log_message(f"Extracted audio size: {audio_file_size / (1024*1024):.1f}MB ({audio_file_size} bytes)")
-                        
-                    except subprocess.TimeoutExpired:
-                        log_message("Audio extraction timed out")
-                        return "❌ Error: Audio extraction timed out (file may be too large)"
-                    except FileNotFoundError:
-                        log_message("ffmpeg not found")
-                        return "❌ Error: ffmpeg is not installed. Please install ffmpeg to transcribe video files."
-                    
-                else:
-                    # For audio files, use the source file directly
-                    audio_file_path = source_file_path
-                    audio_file_size = source_file_size
-                    log_message(f"Using audio file directly: {audio_file_path} ({audio_file_size / (1024*1024):.1f}MB)")
-                
-                # Prepare the API request
-                headers = {
-                    "Authorization": f"Bearer {API_KEY}"
-                }
-                
-                # Send request to STT API
-                # For OpenAI-compatible APIs, we need to send the file as multipart/form-data
-                log_message(f"Starting transcription API request to {API_URL}")
-                log_message(f"Audio file size to upload: {audio_file_size / (1024*1024):.1f}MB ({audio_file_size} bytes)")
-                api_start = time.time()
-                
-                async with httpx.AsyncClient() as session:
-                    # Open the audio file and send it
-                    with open(audio_file_path, "rb") as audio_file:
-                        audio_content = audio_file.read()
-                        log_message(f"Read {len(audio_content)} bytes from audio file, starting POST request")
-                        files = {
-                            "file": (f"audio{os.path.splitext(audio_file_path)[1]}", audio_content),
-                            "model": MODEL,
-                        }
-                        
-                        # Add response_format if supported (text is default)
-                        data = {
-                            "response_format": "text",
-                        }
-                        
-                        response = await session.post(API_URL, files=files, data=data, headers=headers, timeout=600.0)
-                        log_message(f"API response received: status={response.status_code}")
-                        response.raise_for_status()
-                        transcription = response.text
-                        log_message(f"Transcription received: {len(transcription)} characters")
-                
-                api_time = time.time() - api_start
-                log_message(f"API transcription completed in {api_time:.1f}s")
-                
-                # Clean up the transcription (remove leading/trailing whitespace)
-                transcription = transcription.strip()
-                
-                if not transcription:
-                    log_message("Transcription returned empty result")
-                    return "❌ Error: Transcription returned empty result"
-                
-                total_time = time.time() - start_time
-                file_type_desc = "video" if is_video else "audio"
-                log_message(f"SUCCESS - Total time: {total_time:.1f}s")
-                timing_info = f" (Total: {total_time:.1f}s)"
-                return f"✅ Audio Transcription for {file_type_desc} file ID {file_id} (from {client_name}){timing_info}:\n\n{transcription}"
-            
-            finally:
-                # Clean up extracted audio file if it's different from source
-                if audio_file_path and audio_file_path != source_file_path and not temp_source:
-                    try:
-                        if os.path.exists(audio_file_path):
-                            os.remove(audio_file_path)
-                    except Exception as e:
-                        pass
-        else:
-            # Fallback to get_file method if path not available
-            log_message("Using fallback get_file method (file path not available)")
-            file_data = client_obj.get_file(file_id=file_id)
-            file_bytes = file_data.content
-            log_message(f"Downloaded file from Hydrus: {len(file_bytes) / (1024*1024):.1f}MB")
-            
-            # Detect file type from content using helper function
-            file_type_info = detect_file_type_from_bytes(file_bytes)
-            is_video = file_type_info['is_video']
-            file_extension = file_type_info['file_extension']
-            
-            # Save file to temporary location
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
-                temp_file.write(file_bytes)
-                source_file_path = temp_file.name
-            
-            source_file_size = len(file_bytes)
-            audio_file_path = None
-            log_message(f"Saved to temp file: {source_file_path}")
-            
-            try:
-                # If it's a video file, extract audio track using ffmpeg
-                if is_video:
-                    log_message(f"Starting audio extraction from video ({source_file_size / (1024*1024):.1f}MB)")
-                    extract_start = time.time()
-                    
-                    # Set ffmpeg codec and output extension based on AUDIO_FORMAT
-                    if AUDIO_FORMAT == "mp3":
-                        audio_codec = "libmp3lame"
-                        audio_suffix = ".mp3"
-                        audio_bitrate = "64k"  # 64kbps is sufficient for speech recognition
-                    elif AUDIO_FORMAT == "flac":
-                        audio_codec = "flac"
-                        audio_suffix = ".flac"
-                        audio_bitrate = None
-                    else:
-                        audio_codec = "pcm_s16le"
-                        audio_suffix = ".wav"
-                        audio_bitrate = None
-                    
-                    audio_file_path = tempfile.mktemp(suffix=audio_suffix)
-                    log_message(f"Audio output path: {audio_file_path}")
-                    
-                    try:
-                        # Use ffmpeg to extract audio track
-                        ffmpeg_cmd = [
-                            "ffmpeg", "-i", source_file_path,
-                            "-vn",  # No video
-                            "-acodec", audio_codec,  # MP3, WAV or FLAC codec
-                            "-ar", "16000",  # 16kHz sample rate (good for STT)
-                            "-ac", "1",  # Mono audio
-                            "-loglevel", "quiet",  # Suppress output to prevent hanging
-                            "-y", audio_file_path
-                        ]
-                        if audio_bitrate:
-                            ffmpeg_cmd.insert(ffmpeg_cmd.index("-y"), "-b:a")
-                            ffmpeg_cmd.insert(ffmpeg_cmd.index("-y"), audio_bitrate)
-                        
-                        log_message(f"Running ffmpeg: {' '.join(ffmpeg_cmd)}")
-                        
-                        result = subprocess.run(
-                            ffmpeg_cmd,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            timeout=600  # Increased timeout for large files
-                        )
-                        
-                        extract_time = time.time() - extract_start
-                        log_message(f"Audio extraction completed in {extract_time:.1f}s")
-                        
-                        if result.returncode != 0:
-                            # Get stderr from result (now captured as bytes)
-                            stderr_text = result.stderr.decode('utf-8', errors='replace') if result.stderr else "Unknown error"
-                            log_message(f"FFmpeg error (returncode {result.returncode}): {stderr_text[:500]}")
-                            return f"❌ Error: Failed to extract audio from video - {stderr_text[:200]}"
-                        
-                        if not os.path.exists(audio_file_path):
-                            log_message("Audio extraction completed but output file was not created")
-                            return "❌ Error: Audio extraction completed but output file was not created"
-                        
-                        audio_file_size = os.path.getsize(audio_file_path)
-                        log_message(f"Extracted audio size: {audio_file_size / (1024*1024):.1f}MB ({audio_file_size} bytes)")
-                        
-                    except subprocess.TimeoutExpired:
-                        log_message("Audio extraction timed out")
-                        return "❌ Error: Audio extraction timed out (file may be too large)"
-                    except FileNotFoundError:
-                        log_message("ffmpeg not found")
-                        return "❌ Error: ffmpeg is not installed. Please install ffmpeg to transcribe video files."
-                    
-                else:
-                    # For audio files, use the source file directly
-                    audio_file_path = source_file_path
-                    audio_file_size = source_file_size
-                    log_message(f"Using audio file directly: {audio_file_path} ({audio_file_size / (1024*1024):.1f}MB)")
-                
-                # Prepare the API request
-                headers = {
-                    "Authorization": f"Bearer {API_KEY}"
-                }
-                
-                # Send request to STT API
-                # For OpenAI-compatible APIs, we need to send the file as multipart/form-data
-                log_message(f"Starting transcription API request to {API_URL}")
-                log_message(f"Audio file size to upload: {audio_file_size / (1024*1024):.1f}MB ({audio_file_size} bytes)")
-                api_start = time.time()
-                
-                async with httpx.AsyncClient() as session:
-                    # Open the audio file and send it
-                    with open(audio_file_path, "rb") as audio_file:
-                        audio_content = audio_file.read()
-                        log_message(f"Read {len(audio_content)} bytes from audio file, starting POST request")
-                        files = {
-                            "file": (f"audio{os.path.splitext(audio_file_path)[1]}", audio_content),
-                            "model": MODEL,
-                        }
-                        
-                        # Add response_format if supported (text is default)
-                        data = {
-                            "response_format": "text",
-                        }
-                        
-                        response = await session.post(API_URL, files=files, data=data, headers=headers, timeout=600.0)
-                        log_message(f"API response received: status={response.status_code}")
-                        response.raise_for_status()
-                        transcription = response.text
-                        log_message(f"Transcription received: {len(transcription)} characters")
-                
-                api_time = time.time() - api_start
-                log_message(f"API transcription completed in {api_time:.1f}s")
-                
-                # Clean up the transcription (remove leading/trailing whitespace)
-                transcription = transcription.strip()
-                
-                if not transcription:
-                    log_message("Transcription returned empty result")
-                    return "❌ Error: Transcription returned empty result"
-                
-                total_time = time.time() - start_time
-                file_type_desc = "video" if is_video else "audio"
-                log_message(f"SUCCESS - Total time: {total_time:.1f}s")
-                timing_info = f" (Total: {total_time:.1f}s)"
-                return f"✅ Audio Transcription for {file_type_desc} file ID {file_id} (from {client_name}){timing_info}:\n\n{transcription}"
-            
-            finally:
-                # Clean up temporary source file
-                try:
-                    if os.path.exists(source_file_path):
-                        os.remove(source_file_path)
-                except Exception as e:
-                    pass
-                
-                # Clean up extracted audio file if it's different from source
-                if audio_file_path and audio_file_path != source_file_path:
-                    if os.path.exists(audio_file_path):
-                        os.remove(audio_file_path)
-    except httpx.HTTPError as e:
-        # Get more details about the error response
-        error_details = str(e)
-        log_message(f"HTTP Error occurred: {error_details}")
-        try:
-            resp = getattr(e, 'response', None)
-            if resp is not None:
-                status = getattr(resp, 'status_code', 'unknown')
-                text = getattr(resp, 'text', '')[:200]
-                error_details = f"Status code: {status}, Response body: {text}"
-                log_message(f"HTTP Error details - Status: {status}, Body: {text}")
-                
-                # Special handling for 413 (Request Entity Too Large)
-                if status == 413:
-                    log_message("File too large error (HTTP 413)")
-                    return f"❌ Error: File too large for transcription (HTTP 413). The STT API has a maximum file size limit (typically 2GB). Consider splitting the audio into smaller chunks or using a shorter video clip."
-        except Exception as inner_e:
-            error_details = f"Original error: {str(e)}, Failed to get details: {str(inner_e)}"
-            log_message(f"Failed to get error details: {inner_e}")
-        log_message(f"Returning HTTP error: {error_details}")
-        return f"❌ Error: HTTP request failed - {error_details}"
-    except Exception as e:
-        log_message(f"Unexpected error: {type(e).__name__}: {str(e)}")
-        return f"❌ Error: {str(e)}"
-
-
-@mcp.tool()
+@mcp.tool()    
 async def hydrus_execute(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
     action: Annotated[str, Field(description="Action to perform: 'list' to list available methods, or a method name to call (e.g., 'search_files', 'add_tags', 'get_file_metadata')")] = "list",
@@ -2158,13 +1062,49 @@ def main():
     transport = os.getenv("MCP_TRANSPORT", "stdio")
     host = os.getenv("MCP_HOST", "127.0.0.1")
     port = int(os.getenv("MCP_PORT", "8000"))
+    mount_path = os.getenv("MCP_MOUNT_PATH", "/mcp")
+
+    # Normalize mount_path (must start with '/', no trailing '/' except root)
+    if not mount_path.startswith("/"):
+        mount_path = "/" + mount_path
+    if mount_path != "/" and mount_path.endswith("/"):
+        mount_path = mount_path.rstrip("/")
+
+    # Disable DNS rebinding protection for web UI transport modes
+    if transport in ("streamable-http", "sse"):
+        from mcp.server.transport_security import TransportSecuritySettings
+        mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
     if transport == "streamable-http":
-        print(f"Starting MCP server with streamable-http transport on {host}:{port}")
-        mcp.run(transport=transport, host=host, port=port)
+        print(f"Starting MCP server with streamable-http transport on {host}:{port} with mount path {mount_path}")
+        mcp.settings.host = host
+        mcp.settings.port = port
+        mcp.settings.streamable_http_path = mount_path
+        mcp.settings.mount_path = mount_path
+
+        app = mcp.streamable_http_app()
+        options_handler = setup_cors(app, mount_path)
+        message_path = mount_path + "/message" if mount_path != "/" else "/message"
+        app.add_route(message_path, options_handler, methods=["OPTIONS"])
+
+        import uvicorn
+        uvicorn.run(app, host=host, port=port)
+
     elif transport == "sse":
-        print(f"Starting MCP server with SSE transport on {host}:{port}")
-        mcp.run(transport=transport, host=host, port=port)
+        print(f"Starting MCP server with SSE transport on {host}:{port} with mount path {mount_path}")
+        mcp.settings.host = host
+        mcp.settings.port = port
+        mcp.settings.mount_path = mount_path
+        mcp.settings.sse_path = mount_path
+
+        app = mcp.sse_app(mount_path)
+        options_handler = setup_cors(app, mount_path)
+        message_path = mount_path + mcp.settings.message_path
+        app.add_route(message_path, options_handler, methods=["OPTIONS"])
+
+        import uvicorn
+        uvicorn.run(app, host=host, port=port)
+
     else:
         print("Starting MCP server with stdio transport")
         mcp.run(transport='stdio')

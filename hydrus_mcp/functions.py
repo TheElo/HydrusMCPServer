@@ -2,6 +2,8 @@ import hydrus_api, os, json, math
 import numpy as np
 from typing import Any
 
+import httpx
+
 
 def load_clients_from_secret() -> list[dict[str, str]]:
     """Load client credentials from environment variable
@@ -855,19 +857,37 @@ def extract_frames_from_video(file_path: str, frame_count: int) -> tuple[list[np
 def get_viewing_stat(file_metadata: dict, stat_key: str, default) -> Any:
     """Extract viewing statistics from file_metadata.
     
-    Searches through file_viewing_statistics list and sums up the stat across all canvas types.
+    For session tracking workflows, only considers media viewer (canvas_type 0)
+    to track intentional viewing sessions. Preview viewer and API access are ignored
+    as they don't represent actual viewing activity.
+    
+    Canvas types:
+    - 0: media viewer (full file viewing) - COUNTED
+    - 1: preview viewer (thumbnail/preview) - IGNORED
+    - 4: client api viewer (programmatic access) - IGNORED
+    
+    Applies to: views, viewtime, last_viewed_timestamp
     """
     stats_list = file_metadata.get('file_viewing_statistics', [])
     total = default
     for stat in stats_list:
         if isinstance(stat, dict) and stat_key in stat:
+            # Only consider media viewer (canvas_type 0) for viewing statistics
+            canvas_type = stat.get('canvas_type', -1)
+            if canvas_type != 0:
+                continue
+                
             val = stat[stat_key]
             if isinstance(total, int) and isinstance(val, (int, float)):
                 total += int(val)
             elif isinstance(total, float) and isinstance(val, (int, float)):
                 total += val
-            elif stat_key == 'last_viewed_timestamp' and val is not None:
-                if total is None or val > total:
+            elif val is not None:
+                # For timestamps or when total is None/default
+                if stat_key == 'last_viewed_timestamp':
+                    if total is None or val > total:
+                        total = val
+                else:
                     total = val
     return total
 
@@ -909,6 +929,16 @@ def format_timestamp(timestamp) -> str:
         # Handle timestamps that are too small (negative or before epoch)
         elif ts < 0:
             return "N/A"
+        
+        # Validate timestamp is within a reasonable future range
+        # This is a safety check to filter out corrupted timestamps that may have
+        # been caused by arithmetic errors (e.g., summing timestamps instead of max)
+        # The bug in get_viewing_stat() previously doubled timestamps, creating
+        # dates in 2082/2083 when valid 2026 timestamps were added together.
+        current_time = datetime.now().timestamp()
+        max_valid_timestamp = current_time + (5 * 365.25 * 24 * 3600)  # 5 years from now
+        if ts > max_valid_timestamp:
+            return "N/A (filtered: future timestamp)"
         
         dt = datetime.fromtimestamp(ts)
         return dt.strftime("%Y.%m.%d %H:%M:%S")
@@ -966,4 +996,249 @@ def extract_tags_by_service(tags_dict: dict, service_names: list[str] = None, ta
         if all_tags:
             result[service_name] = all_tags
     
+    return result
+
+
+def get_audio_codec_config(audio_format: str) -> tuple[str, str, str | None]:
+    """Get ffmpeg codec, output suffix, and bitrate for the given audio format.
+    
+    Args:
+        audio_format: One of 'mp3', 'flac', or 'wav'
+        
+    Returns:
+        Tuple of (codec, suffix, bitrate) where bitrate may be None
+    """
+    if audio_format == "mp3":
+        return ("libmp3lame", ".mp3", "64k")
+    elif audio_format == "flac":
+        return ("flac", ".flac", None)
+    else:  # wav or default
+        return ("pcm_s16le", ".wav", None)
+
+
+def build_ffmpeg_cmd(source_path: str, output_path: str, codec: str, bitrate: str | None, verbose: bool) -> list[str]:
+    """Build ffmpeg command list for audio extraction from video.
+    
+    Args:
+        source_path: Path to the source video file
+        output_path: Path for the output audio file
+        codec: Audio codec (e.g., 'libmp3lame', 'flac', 'pcm_s16le')
+        bitrate: Audio bitrate (e.g., '64k') or None
+        verbose: If True, capture stderr for logging; if False, suppress output
+        
+    Returns:
+        List of command arguments for subprocess.run()
+    """
+    loglevel = "error" if verbose else "quiet"
+    cmd = [
+        "ffmpeg", "-i", source_path,
+        "-vn",  # No video
+        "-acodec", codec,
+        "-ar", "16000",  # 16kHz sample rate (good for STT)
+        "-ac", "1",  # Mono audio
+        "-loglevel", loglevel,
+        "-y", output_path
+    ]
+    if bitrate:
+        cmd.insert(cmd.index("-y"), "-b:a")
+        cmd.insert(cmd.index("-y"), bitrate)
+    return cmd
+
+
+def extract_audio_from_video(
+    source_path: str,
+    output_path: str,
+    audio_format: str,
+    verbose: bool,
+    log_message
+) -> tuple[bool, str | None, int]:
+    """Extract audio from video file using ffmpeg.
+    
+    Args:
+        source_path: Path to source video file
+        output_path: Path for output audio file
+        audio_format: 'mp3', 'flac', or 'wav'
+        verbose: If True, capture subprocess output for logging
+        log_message: Logging callback function
+        
+    Returns:
+        Tuple of (success, error_message, output_file_size)
+        On failure: (False, error_message, 0)
+    """
+    import subprocess
+    
+    codec, suffix, bitrate = get_audio_codec_config(audio_format)
+    
+    # Verify source file exists
+    if not os.path.exists(source_path):
+        log_message(f"Source file not found: {source_path}")
+        return (False, f"Source file not found at {source_path}", 0)
+    
+    cmd = build_ffmpeg_cmd(source_path, output_path, codec, bitrate, verbose)
+    log_message(f"Running ffmpeg: {' '.join(cmd)}")
+    source_size = os.path.getsize(source_path)
+    log_message(f"Source file size: {source_size / (1024*1024):.1f}MB")
+    
+    try:
+        stdout_pipe = subprocess.PIPE if verbose else subprocess.DEVNULL
+        stderr_pipe = subprocess.PIPE if verbose else subprocess.DEVNULL
+        
+        result = subprocess.run(
+            cmd,
+            stdout=stdout_pipe,
+            stderr=stderr_pipe,
+            timeout=600,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+        
+        if result.returncode != 0:
+            if verbose and result.stderr:
+                stderr_text = result.stderr.decode('utf-8', errors='replace')
+            else:
+                stderr_text = "Unknown error"
+            log_message(f"FFmpeg error (returncode {result.returncode}): {stderr_text[:500]}")
+            return (False, f"Failed to extract audio from video - {stderr_text[:200]}", 0)
+        
+        if not os.path.exists(output_path):
+            log_message("Audio extraction completed but output file was not created")
+            return (False, "Audio extraction completed but output file was not created", 0)
+        
+        output_size = os.path.getsize(output_path)
+        log_message(f"Extracted audio size: {output_size / (1024*1024):.1f}MB ({output_size} bytes)")
+        return (True, None, output_size)
+        
+    except subprocess.TimeoutExpired:
+        log_message("Audio extraction timed out")
+        return (False, "Audio extraction timed out (file may be too large)", 0)
+    except FileNotFoundError:
+        log_message("ffmpeg not found")
+        return (False, "ffmpeg is not installed. Please install ffmpeg to transcribe video files.", 0)
+
+
+async def send_to_stt_api(
+    audio_file_path: str,
+    api_url: str,
+    api_key: str,
+    model: str,
+    log_message
+) -> tuple[str | None, str | None]:
+    """Send audio file to speech-to-text API for transcription.
+    
+    Args:
+        audio_file_path: Path to the audio file
+        api_url: STT API endpoint URL
+        api_key: API key for authentication
+        model: Model name to use
+        log_message: Logging callback function
+        
+    Returns:
+        Tuple of (transcription_text, error_message)
+        On success: (transcription_text, None)
+        On failure: (None, error_message)
+    """
+    headers = {"Authorization": f"Bearer {api_key}"}
+    
+    log_message(f"Starting transcription API request to {api_url}")
+    audio_file_size = os.path.getsize(audio_file_path)
+    log_message(f"Audio file size to upload: {audio_file_size / (1024*1024):.1f}MB ({audio_file_size} bytes)")
+    
+    async with httpx.AsyncClient() as session:
+        with open(audio_file_path, "rb") as audio_file:
+            audio_content = audio_file.read()
+            log_message(f"Read {len(audio_content)} bytes from audio file, starting POST request")
+            files = {
+                "file": (f"audio{os.path.splitext(audio_file_path)[1]}", audio_content),
+                "model": model,
+            }
+            data = {"response_format": "text"}
+            
+            response = await session.post(api_url, files=files, data=data, headers=headers, timeout=600.0)
+            log_message(f"API response received: status={response.status_code}")
+            response.raise_for_status()
+            transcription = response.text
+            log_message(f"Transcription received: {len(transcription)} characters")
+    
+    return (transcription, None)
+
+
+def format_transcription_result(
+    file_type_desc: str,
+    file_id: int,
+    client_name: str,
+    total_time: float,
+    transcription: str
+) -> str:
+    """Format the final transcription result string.
+    
+    Args:
+        file_type_desc: 'video' or 'audio'
+        file_id: The file ID that was transcribed
+        client_name: Name of the Hydrus client
+        total_time: Total processing time in seconds
+        transcription: The transcription text
+        
+    Returns:
+        Formatted result string
+    """
+    timing_info = f" (Total: {total_time:.1f}s)"
+    return f"✅ Audio Transcription for {file_type_desc} file ID {file_id} (from {client_name}){timing_info}:\n\n{transcription}"
+
+
+def format_single_metadata(
+    file_metadata: dict,
+    identifier: Any,
+    identifier_type: str,
+    filter_keys: list[str],
+    tags_services: str | None,
+    tag_type_for_filter: str
+) -> str:
+    """Format a single file metadata entry based on filter keys.
+    
+    Args:
+        file_metadata: Dictionary containing file metadata
+        identifier: File ID or hash for this entry
+        identifier_type: 'ID' or 'hash'
+        filter_keys: List of fields to include in output
+        tags_services: Optional comma-separated service names for tag filtering
+        tag_type_for_filter: 'display_tags' or 'storage_tags'
+        
+    Returns:
+        Formatted string for this metadata entry
+    """
+    result = f"\n{identifier_type} {identifier}:\n"
+    if 'file_id' in filter_keys:
+        file_id = file_metadata.get('file_id', 'N/A')
+        result += f"{file_id}\n"
+    if 'hash' in filter_keys and 'hash' in file_metadata:
+        result += f"{file_metadata['hash']}\n"
+    if 'size' in filter_keys and 'size' in file_metadata:
+        result += f"{file_metadata['size']} bytes\n"
+    if 'mime' in filter_keys and 'mime' in file_metadata:
+        result += f"{file_metadata['mime']}\n"
+    if 'dimensions' in filter_keys:
+        width = file_metadata.get('width', 'N/A')
+        height = file_metadata.get('height', 'N/A')
+        result += f"{width}x{height}\n"
+    if 'duration' in filter_keys:
+        duration = file_metadata.get('duration')
+        if duration is not None:
+            result += f"{duration}ms\n"
+        else:
+            result += "N/A (not a video)\n"
+    if 'views' in filter_keys:
+        views = get_viewing_stat(file_metadata, 'views', 0)
+        result += f"{views}\n"
+    if 'viewtime' in filter_keys:
+        viewtime = get_viewing_stat(file_metadata, 'viewtime', 0.0)
+        result += f"{viewtime:.1f}s\n"
+    if 'last_viewed' in filter_keys:
+        last_viewed = get_viewing_stat(file_metadata, 'last_viewed_timestamp', None)
+        result += f"{format_timestamp(last_viewed)}\n"
+    if 'time_modified' in filter_keys and 'time_modified' in file_metadata:
+        result += f"{format_timestamp(file_metadata['time_modified'])}\n"
+    if 'tags' in filter_keys and 'tags' in file_metadata:
+        tags_by_service = extract_tags_by_service(file_metadata['tags'], tags_services, tag_type_for_filter)
+        result += "tags:\n"
+        for service_name, tag_list in tags_by_service.items():
+            result += f"  {service_name}: {', '.join(tag_list)}\n"
     return result

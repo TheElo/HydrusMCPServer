@@ -47,103 +47,278 @@ The server enables the LLM to:
 
 # Setup
 
-## UVX Setup (recommended)
-To configure with LM Studio, use this JSON configuration:
+## Quick Start (Minimal Config)
+
+The absolute minimum to get started:
 
 ```json
 {
-	"mcpServers": {
-		"hydrus-mcp": {
-			"command": "uvx",
-			"args": [
-				"hydrus-mcp"
-			],
-			"env": {
-				"HYDRUS_CLIENTS": "[[\"Name1\", \"http://localhost:45869/\", \"APIKEY1\"], [\"Name2\", \"http://localhost:45870/\", \"APIKEY2\"]"
-			}
-		}
-	}
+  "mcpServers": {
+    "hydrus-mcp": {
+      "command": "uvx",
+      "args": ["hydrus-mcp"],
+      "env": {
+        "HYDRUS_CLIENTS": "[[\"myhydrus\", \"http://localhost:45869/\", \"YOUR_API_KEY\"]]"
+      }
+    }
+  }
 }
 ```
 
-### LM Studio (addition timeout parameter specific to this and some other hosts)
+
+**That's it!** Replace `YOUR_API_KEY` with your actual Hydrus API key and you're done.
+
+---
+
+## Complete Configuration Reference
+
+Here's the full configuration with all optional features:
+
+
+
+```json
+{
+  "mcpServers": {
+    "hydrus-mcp": {
+      "command": "uvx",
+      "args": ["hydrus-mcp"],
+      "env": {
+        "HYDRUS_CLIENTS": "[[\"name1\", \"http://localhost:45869/\", \"apikey1\"], [\"name2\", \"http://localhost:45870/\", \"apikey2\"]]",
+        "MCP_TRANSPORT": "stdio",
+        "MCP_HOST": "127.0.0.1",
+        "MCP_PORT": "8000",
+        "VISION_API_URL": "http://localhost:11434/v1/chat/completions",
+        "VISION_API_KEY": "",
+        "VISION_MODEL": "llava",
+        "STT_API_URL": "http://localhost:5092/v1/audio/transcriptions",
+        "STT_API_KEY": "sk-no-key-required",
+        "STT_MODEL": "parakeet-tdt-0.6b-v3",
+        "HYDRUS_ADD_TAGS_ENABLED": "true",
+        "HYDRUS_ADD_TAGS_WHITELIST": "myhydrus:llm_tags,auto_tags",
+        "EXEC_WHITELIST": "get_api_version,get_mr_bones"
+      },
+      "timeout": 360000
+    }
+  }
+}
+```
+
+---
+
+## Environment Variable Reference
+
+### Required
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `HYDRUS_CLIENTS` | JSON array of `[name, url, apikey]` tuples | `"[["myhydrus", "http://localhost:45869/", "ABC123"]]"` |
+
+### Optional - Transport Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_TRANSPORT` | `stdio` | Transport mode: `stdio`, `streamable-http`, or `sse` |
+| `MCP_HOST` | `127.0.0.1` | Host to bind to (use `0.0.0.0` for external access) |
+| `MCP_PORT` | `8000` | Port for HTTP transports |
+
+**When to use streamable-http:** Web-based clients like llama-server webui, OpenWebUI, or remote access scenarios.
+
+### Optional - Vision API
+
+Enable image/video analysis with tools like `hydrus_inspect_files`.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VISION_API_URL` | Yes | OpenAI-compatible vision API endpoint |
+| `VISION_API_KEY` | No | API key (if required) |
+| `VISION_MODEL` | Yes | Model name (e.g., `llava`, `bakllava`) |
+
+### Optional - Speech-to-Text
+
+Enable audio transcription with `hydrus_transcribe_audio`.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `STT_API_URL` | Yes | OpenAI-compatible STT API endpoint |
+| `STT_API_KEY` | No | API key (default: `sk-no-key-required`) |
+| `STT_MODEL` | Yes | Model name (e.g., `parakeet-tdt-0.6b-v3`) |
+
+**Note:** Requires `ffmpeg` installed on the system for video files.
+
+### Optional - Tag Addition (DANGEROUS)
+
+Allows the LLM to add tags to files. **Use with extreme caution.**
+
+| Variable | Description |
+|----------|-------------|
+| `HYDRUS_ADD_TAGS_ENABLED` | Set to `"true"` to enable |
+| `HYDRUS_ADD_TAGS_WHITELIST` | Format: `client_name:service1,service2\|client2:service3` |
+
+**Recommendation:** Create a dedicated tag service for LLM use to avoid polluting existing tags.
+
+### Optional - Dynamic API Execution
+
+Allows calling any Hydrus API method dynamically via `hydrus_execute`.
+
+| Variable | Description |
+|----------|-------------|
+| `EXEC_WHITELIST` | Comma-separated list of allowed method names |
+
+**Security:** Deny-by-default. Only `action='list'` is allowed without whitelist.
+
+### Optional - LM Studio Specific
+
+| Variable | Description |
+|----------|-------------|
+| `timeout` | Request timeout in milliseconds (LM Studio only) |
+
+---
+
+## Common Setup Examples
+
+### Example 1: Basic Local Setup (LM Studio)
+
 LM Studio has additional timeout paramater for each mcp server which can be useful for long queries.
+```json
+{
+  "mcpServers": {
+    "hydrus-mcp": {
+      "command": "uvx",
+      "args": ["hydrus-mcp"],
+      "env": {
+        "HYDRUS_CLIENTS": "[[\"main\", \"http://localhost:45869/\", \"YOUR_API_KEY\"]]"
+      },
+      "timeout": 360000
+    }
+  }
+}
+```
+
+### Example 2: With Vision API (Ollama)
 
 ```json
 {
-	"mcpServers": {
-		"hydrus-mcp": {
-			"command": "uvx",
-			"args": [
-				"hydrus-mcp"
-			],
-			"env": {
-				"HYDRUS_CLIENTS": "[[\"Name1\", \"http://localhost:45869/\", \"APIKEY1\"], [\"Name2\", \"http://localhost:45870/\", \"APIKEY2\"]"
-			},
-			"timeout": 360000
-		}
-	}
+  "mcpServers": {
+    "hydrus-mcp": {
+      "command": "uvx",
+      "args": ["hydrus-mcp"],
+      "env": {
+        "HYDRUS_CLIENTS": "[[\"main\", \"http://localhost:45869/\", \"YOUR_API_KEY\"]]",
+        "VISION_API_URL": "http://localhost:11434/v1/chat/completions",
+        "VISION_MODEL": "llava"
+      }
+    }
+  }
 }
 ```
+
+### Example 3: Web Client (llama-server webui)
+
+```json
+{
+  "mcpServers": {
+    "hydrus-mcp": {
+      "url": "http://localhost:8000"
+    }
+  }
+}
+```
+
+Then run the server separately:
+```bash
+MCP_TRANSPORT=streamable-http MCP_HOST=0.0.0.0 MCP_PORT=8000 HYDRUS_CLIENTS='[["main", "http://localhost:45869/", "KEY"]] uvx hydrus-mcp
+```
+
+### Example 4: Full Feature Setup
+
+```json
+{
+  "mcpServers": {
+    "hydrus-mcp": {
+      "command": "uvx",
+      "args": ["hydrus-mcp"],
+      "env": {
+        "HYDRUS_CLIENTS": "[[\"main\", \"http://localhost:45869/\", \"KEY\"]]",
+        "VISION_API_URL": "http://localhost:11434/v1/chat/completions",
+        "VISION_MODEL": "llava",
+        "STT_API_URL": "http://localhost:5092/v1/audio/transcriptions",
+        "STT_MODEL": "parakeet-tdt-0.6b-v3",
+        "HYDRUS_ADD_TAGS_ENABLED": "true",
+        "HYDRUS_ADD_TAGS_WHITELIST": "main:llm_tags"
+      }
+    }
+  }
+}
+```
+
+---
 
 ## UV Setup (Local Development)
 
-The UV setup is the method for running the Hydrus MCP Server. It uses uv (a Python package manager) to manage dependencies and run the server.
-
-### Clone the Repo
-Clone the repository to a directory of your choice, open a command prompt there, and run:
+For local development instead of `uvx`:
 
 ```bash
 git clone https://github.com/TheElo/HydrusMCPServer
-```
-
-### Install uv
-```bash
+cd HydrusMCPServer
 pip install uv
-```
-
-
-### Install dependencies
-Run `uv sync` to create the virtual environment and install all dependencies:
-
-```bash
 uv sync
 ```
 
-### Add LM Studio MCP Configuration
-
-Add this configuration to your LM Studio mcp.json file. If you don't use LM Studio then you maybe need to remove the timeout block as it's maybe LM Studio specific. 
-
-1. Replace the path to where you downloaded the github project ()"c:/PATH/TO/WHERE/UV/PROJECT/IS/HydrusMCPServer")
-2. Configure your Hydrus client(s) by giving them a short name, the right adress and api key
+Then use this configuration:
 
 ```json
 {
-		"mcpServers": {
-			"hydrus-mcp": {
-			"command": "uv",
-			"args": [
-				"run",
-				"--project",
-				"c:/PATH/TO/WHERE/UV/PROJECT/IS/HydrusMCPServer",
-				"-m",
-				"hydrus_mcp.server"
-			],
-			"env": {
-				"HYDRUS_CLIENTS": "[[\"Name1\", \"http://192.168.1.20:45869/\", \"APIKEY1\"], [\"Name2\", \"http://192.168.1.20:45870/\", \"APIKEY2\"]]"
-			}
-		}
-	}
+  "mcpServers": {
+    "hydrus-mcp": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "c:/PATH/TO/HydrusMCPServer",
+        "-m",
+        "hydrus_mcp.server"
+      ],
+      "env": {
+        "HYDRUS_CLIENTS": "[[\"Name1\", \"http://localhost:45869/\", \"APIKEY1\"]]"
+      }
+    }
+  }
 }
 ```
 
-If this is your only MCP server, simply paste the contents into `mcp.json`. If you already have other MCP servers configured, add the content manually at the appropriate level in the hierarchy to avoid breaking anything.
+---
 
-### Add Context to Character
-Add the provided character prompt to your frontend (LM Studio, OpenWebUI, etc.) where you use your LLM or create your own. Using hydrus is a intricate task, context can help a lot to make the llm behave as you expect it would. Include it in the system prompt or use it as a character prompt. The LLM should be able to use the tools without the character prompt but it will probably require a lot of user input to make it work well or a lot of trial and error by the llm.
+## Add Context to Character (Recommended)
 
+Add the provided `character_prompt.md` to your frontend (LM Studio, OpenWebUI, etc.) where you use your LLM. Using Hydrus is an intricate task -- context helps the LLM behave as expected. The LLM can use the tools without the character prompt, but it will require more user input or trial and error.
 
 _Now it should work_™
+
+---
+
+## Tips
+
+1. **Use short client names** - Saves tokens on every API call (e.g., `mh` instead of `my_hydrus_client`)
+2. **Provide context** - Add information about your Hydrus structure to your system prompt for better results
+3. **Start minimal** - Only add optional features as you need them
+4. **Backup before enabling tag addition** - The LLM can pollute your tags if not carefully configured
+
+---
+
+## Troubleshooting
+
+**"No Hydrus clients configured"**
+- Check that `HYDRUS_CLIENTS` is set correctly
+- Ensure the JSON format is valid
+- Verify your API key is correct
+
+**Connection timeout**
+- Increase the `timeout` value (LM Studio)
+- Check that your Hydrus server is running and accessible
+
+**Vision/STT tools not working**
+- Ensure the respective environment variables are set
+- Verify the API endpoints are accessible
 
 # Tipps & Tricks
 - provide more context about your structure, content, usecases, strategies as context to your llm either in the chat or in the agent prompt. Hydrus is tricky to use already for a human, a llm needs also some context to understand how to use the tools and when. 
@@ -372,7 +547,19 @@ Or with uvx:
 MCP_TRANSPORT=streamable-http MCP_HOST=0.0.0.0 MCP_PORT=8000 HYDRUS_CLIENTS='[["Name1", "http://localhost:45869/", "APIKEY1"]] uvx hydrus-mcp
 ```
 
+Or with local development (uv run):
+
+```bash
+MCP_TRANSPORT=streamable-http MCP_HOST=127.0.0.1 MCP_PORT=8070 HYDRUS_CLIENTS='[["Hy1", "http://localhost:45869/", "xyz"]]' uv run -m hydrus_mcp.server
+```
+
 The server will start and listen on the specified host and port.
+
+### Multi-Machine Setup
+
+For multi-machine configurations (e.g., Hydrus on one machine, LLM on another, web interface on a third), the server includes CORS middleware to handle cross-origin requests. Without proper CORS configuration, you may encounter 405 Method Not Allowed errors.
+
+The server supports custom mount paths via the `MCP_MOUNT_PATH` environment variable (default: `/mcp`).
 
 ---
 
