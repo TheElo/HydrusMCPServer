@@ -75,6 +75,25 @@ def get_service_key_by_name(client: hydrus_api.Client, service_name: str) -> str
     return None
 
 
+def _file_tags(item, tag_service_key):
+    """A file's tags for a service from a file_metadata item. Hydrus keeps tags under two halves
+    — `storage_tags` (raw) and `display_tags` (siblings/parents applied, computed ASYNCHRONOUSLY)
+    — each split by status ('0' current, '1' pending, '2' deleted, ...). Reading only the fixed
+    `storage_tags['0']` silently drops freshly-imported files whose current storage/display
+    hasn't materialised yet (their tags are still pending, or display sync hasn't run). Prefer
+    current storage, then current display, then pending — so a file with tags in ANY of those is
+    counted. The 2,963 already-current files are unchanged (current storage stays primary)."""
+    svc = ((item.get("tags") or {}).get(str(tag_service_key)) or {})
+    storage = svc.get("storage_tags") or {}
+    display = svc.get("display_tags") or {}
+    return (storage.get("0") or display.get("0") or storage.get("1") or display.get("1") or [])
+
+
+def _fetch_metadata(client_obj, file_ids):
+    a = client_obj.get_file_metadata(file_ids=file_ids)
+    return a.get("metadata") or []
+
+
 def get_tags(client_obj: hydrus_api.Client, file_ids: list[int], tag_service: str = "all known tags") -> list[list[Any]]:
     tag_service_key = get_service_key_by_name(client_obj, tag_service)
 
@@ -83,27 +102,26 @@ def get_tags(client_obj: hydrus_api.Client, file_ids: list[int], tag_service: st
     MyDict: list[list[Any]] = []
 
     for i in range(0, len(file_ids), batch_size):
-        # Get current batch of file IDs (up to batch_size)
         batch_file_ids = file_ids[i : i + batch_size]
-
         try:
-            # Get metadata for this batch
-            a = client_obj.get_file_metadata(file_ids=batch_file_ids)
-
-            # Process each item in the batch
-            for y in range(0, len(a)):  # type: ignore[arg-type]
-                try:
-                    metadata = a.get("metadata")
-                    tags = metadata[y]["tags"][f"{tag_service_key}"]["storage_tags"]["0"]
-                except Exception as e:
-                    tags = [f"Error processing file: {str(e)}"]
-
-                MyDict.append([batch_file_ids[y], tags])
+            metadata = _fetch_metadata(client_obj, batch_file_ids)
         except Exception:
-            # Add error information to results
-            for file_id in batch_file_ids:
-                if not any(existing[0] == file_id for existing in MyDict):
-                    MyDict.append([file_id, [f"Error processing file: {str(e)}"]])
+            # One bad/invalid id can make get_file_metadata raise for the whole batch — retry each
+            # file alone so its batchmates aren't lost with it.
+            metadata = []
+            for fid in batch_file_ids:
+                try:
+                    metadata.extend(_fetch_metadata(client_obj, [fid]))
+                except Exception as e:
+                    MyDict.append([fid, [f"(unreadable: {e})"]])
+
+        # Iterate the actual per-file metadata list. (The old code looped `range(len(a))`,
+        # where `a` is the response WRAPPER — {"metadata": [...], "services": {...}} — so the
+        # bound was the key-count, not the file-count: it overshot into IndexError and dropped
+        # or mis-paired files. Each metadata item already carries its own file_id.)
+        for item in metadata:
+            if isinstance(item, dict):
+                MyDict.append([item.get("file_id"), _file_tags(item, tag_service_key)])
 
     return MyDict
 
@@ -115,37 +133,52 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
     else:
         tag_service_key = get_service_key_by_name(client_obj, "all known tags")
 
+    svc_key = str(tag_service_key)
+
     # Process in batches of 3
     batch_size = 3
-    tag_counts = {}
+    tag_counts: dict[str, int] = {}
+    counted = 0          # files whose metadata we actually read
+    no_metadata = 0      # get_file_metadata returned nothing for these (even retried alone)
+    empty: list[Any] = []        # read OK but the expected current-tags path yielded nothing
+    empty_sample: list[dict] = []  # structure of the first few `empty` files, for diagnosis
 
     for i in range(0, len(file_ids), batch_size):
-        # Get current batch of file IDs (up to batch_size)
         batch_file_ids = file_ids[i:i + batch_size]
-
         try:
-            # Get metadata for this batch
-            a = client_obj.get_file_metadata(file_ids=batch_file_ids)
-
-            # Process each item in the batch
-            for y in range(0, len(a)):
-                try:
-                    metadata = a.get("metadata")
-                    tags = metadata[y]["tags"][f"{tag_service_key}"]["storage_tags"]["0"]
-                except Exception as e:
-                    tags = [f"Error processing file: {str(e)}"]
-
-                if tags:
-                    for tag in tags:
-                        if tag in tag_counts:
-                            tag_counts[tag] += 1
-                        else:
-                            tag_counts[tag] = 1
+            metadata = _fetch_metadata(client_obj, batch_file_ids)
         except Exception:
-            # Add error information to counts
-            for file_id in batch_file_ids:
-                if not any(existing[0] == file_id for existing in tag_counts):
-                    tag_counts[f"Error processing file {file_id}"] = 1
+            # one bad id can poison the whole batch — retry each file alone so batchmates survive
+            metadata = []
+            for fid in batch_file_ids:
+                try:
+                    metadata.extend(_fetch_metadata(client_obj, [fid]))
+                except Exception:
+                    no_metadata += 1
+
+        for item in metadata:
+            if not isinstance(item, dict):
+                continue
+            counted += 1
+            tags = _file_tags(item, svc_key)
+            if tags:
+                for tag in tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            else:
+                # Metadata is present but tags[svc_key]["storage_tags"]["0"] gave nothing. Don't
+                # guess why — record what IS there (is the expected service key present? which tag
+                # statuses exist?) so a genuine gap is DIAGNOSED rather than silently swallowed.
+                empty.append(item.get("file_id"))
+                if len(empty_sample) < 8:
+                    all_tags = item.get("tags") or {}
+                    svc = all_tags.get(svc_key) or {}
+                    empty_sample.append({
+                        "file_id": item.get("file_id"),
+                        "has_expected_service_key": svc_key in all_tags,
+                        "service_keys_present": list(all_tags.keys()),
+                        "storage_tags_statuses": list((svc.get("storage_tags") or {}).keys()),
+                        "display_tags_statuses": list((svc.get("display_tags") or {}).keys()),
+                    })
 
     # Convert to list of [tag, count] pairs sorted by count (highest to lowest)
     result = [[tag, count] for tag, count in tag_counts.items()]
@@ -156,11 +189,22 @@ def get_tags_summary(client_obj, file_ids, tag_service=None, result_limit=None):
         try:
             result_limit_int = int(result_limit)
             if result_limit_int > 0 and len(result) > result_limit_int:
-                return result[:result_limit_int]
+                result = result[:result_limit_int]
         except (ValueError, TypeError):
             pass
 
-    return result
+    # Returns (rows, diag). diag fully accounts for every requested file and, when some come back
+    # without tags, samples their actual structure so the caller can report WHY rather than excuse
+    # them silently.
+    diag = {
+        "matched": len(file_ids),
+        "counted": counted,
+        "no_metadata": no_metadata,
+        "empty_tags": len(empty),
+        "expected_service_key": svc_key,
+        "empty_sample": empty_sample,
+    }
+    return result, diag
 
 def parse_hydrus_tags(query, additional_tags=None):
             """Parse Hydrus query string into proper tag structure

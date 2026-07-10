@@ -295,6 +295,22 @@ async def hydrus_query(
         return json.dumps({"error": str(e)})
 
 
+def _coverage_note(tag_service, diag):
+    """Render get_tags_summary diagnostics as text — only when something didn't fully account,
+    so a clean run stays quiet. Surfaces WHICH files came back without tags and what their
+    metadata actually contained, instead of silently dropping them from the denominator."""
+    if not diag.get("no_metadata") and not diag.get("empty_tags"):
+        return ""
+    parts = [f"COVERAGE: counted {diag['counted']} of {diag['matched']} files"]
+    if diag.get("no_metadata"):
+        parts.append(f"{diag['no_metadata']} returned no metadata at all")
+    if diag.get("empty_tags"):
+        parts.append(f"{diag['empty_tags']} had no tags via '{tag_service}' "
+                     f"(expected service key {diag['expected_service_key']}); "
+                     f"sample {diag['empty_sample']}")
+    return " " + "; ".join(parts) + "."
+
+
 @mcp.tool()
 async def hydrus_get_tags(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
@@ -302,7 +318,7 @@ async def hydrus_get_tags(
     content_type: Annotated[str, Field(description="Type of content - 'file_ids', 'query', or 'page_key' (default: 'query')")] = "query",
     tag_service: Annotated[str, Field(description="Tag service name (default: 'all known tags')")] = "all known tags",
     trs: Annotated[Any, Field(description="Threshold for summary view. If the threshold is lower than the received file ids (either directly or from query) then the summary view is used which only returns tags and their counts from the results instead (default: '100')")] = "50",
-    limit: Annotated[Any, Field(description="Limits the results to x files. Default 1000. Override if you need more or less results.")] = "1000",
+    limit: Annotated[Any, Field(description="Caps the SAMPLE of files the tag distribution is computed over (default 1000). The TRUE total match count is always reported separately. Set to 0 for the full match set (accurate but slower on large queries).")] = "1000",
     result_limit: Annotated[Any, Field(description="Limits the number of top tags shown in summary view. Default 150.")] = "150"
 ) -> str:
     """Get tags for files in Hydrus client.
@@ -333,14 +349,10 @@ async def hydrus_get_tags(
             # Handle query - execute search and get file IDs
             try:
 
-                # we will append a hardcoded limit for now, in the future this code should be made smarter by checking if "system:limit is*" tag is in the query and if yes, skipping adding this tag and also tell the llm that at least this limit is enabled or have it pass a value
-                if not limit:
-                    limit = str(1000)
-                appended_tag = f'system:limit is {limit}'
-
-                tags = parse_hydrus_tags(content, appended_tag)
-
-                # todo: we should add a system:limit is {limit}. function here that adds that tag to the tags if not such tag is present, to limit results and prevent ctx overflow.
+                # Search WITHOUT a baked-in `system:limit` so result_count is the TRUE match
+                # total. `limit` now caps only the SAMPLE the tag distribution is computed over
+                # (the true total is always reported); limit<=0 computes over the full match set.
+                tags = parse_hydrus_tags(content)
 
                 tag_service_key = str(get_service_key_by_name(client_obj, tag_service))
 
@@ -352,26 +364,36 @@ async def hydrus_get_tags(
 
                 # Execute the search
                 file_ids_response = client_obj.search_files(**search_params)
-
                 file_ids = file_ids_response['file_ids']
-        
-                result_count = len(file_ids)
+                result_count = len(file_ids)   # TRUE total match count
+
+                if result_count == 0:
+                    return f"❌ No files found for query '{content}' (count: 0)"
+
+                limit_int = safe_int_convert(limit, 1000)
+                sample_ids = file_ids if limit_int <= 0 else file_ids[:limit_int]
 
                 # Check threshold for summary view
                 if trs_int < result_count:
-                    result = f"The count of {result_count} files from query '{content}' is above the threshold {trs}. Therefore you see a summary of the tags and the tag counts in the results. If you want to see the tags per file instead, then use less files or set the trs to be above the count of files. This shows the result_limit={result_limit} tags with the highest count. "
-                    # Apply result_limit if provided
-                    result_limit_int = safe_int_convert(result_limit, 100)
-
-                    summary_result = get_tags_summary(client_obj, file_ids=file_ids, tag_service=tag_service)
-                    # Limit the number of tags shown based on result_limit
-                    if result_limit_int > 0 and len(summary_result) > result_limit_int:
+                    result_limit_int = safe_int_convert(result_limit, 150)
+                    summary_result, diag = get_tags_summary(
+                        client_obj, file_ids=sample_ids, tag_service=tag_service)
+                    total_distinct = len(summary_result)
+                    if result_limit_int > 0 and total_distinct > result_limit_int:
                         summary_result = summary_result[:result_limit_int]
-                        result = result + f" (Showing {len(summary_result)} of {len(file_ids)} files, top {result_limit_int} tags by count)"
-                    result = result + str(summary_result)
-                    return result
-                if result_count == 0:
-                    return f"❌ No files found for query '{tags}' (count: {result_count})'"
+                    sampled = len(sample_ids)
+                    sample_note = ("" if sampled >= result_count else
+                                   f" The distribution below is a SAMPLE over the first {sampled} of "
+                                   f"{result_count} matching files — raise `limit` or set it to 0 for "
+                                   f"the full set.")
+                    cover_note = _coverage_note(tag_service, diag)
+                    result = (f"Query '{content}' matched {result_count} files total, above the trs "
+                              f"threshold {trs}, so here is a tag-count summary (showing the top "
+                              f"{len(summary_result)} of {total_distinct} distinct tags by count)."
+                              f"{sample_note}{cover_note} ")
+                    return result + str(summary_result)
+                # under threshold → fall through to the per-file path with the sampled ids
+                file_ids = sample_ids
 
             except json.JSONDecodeError as e:
                 return f"❌ Error: Invalid response from query - {str(e)}, content: {content}, content_type: {content_type}, tag_service: {tag_service}, trs = {trs}"
@@ -424,15 +446,16 @@ async def hydrus_get_tags(
 
         # Get tags using the existing get_tags function (with summary logic)
         if trs_int < len(file_ids):
-            result = f"The count of {len(file_ids)} file ids is above the threshold {trs}. Therefore you see a summary of the tags and the tag counts in the results. If you want to see the tags per file instead, then use less file ids or set the trs to be above the count of file ids. "
-            # Apply result_limit if provided
-            result_limit_int = safe_int_convert(result_limit, 100)
-
-            summary_result = get_tags_summary(client_obj, file_ids=file_ids, tag_service=tag_service)
-            # Limit the number of tags shown based on result_limit
-            if result_limit_int > 0 and len(summary_result) > result_limit_int:
+            result_limit_int = safe_int_convert(result_limit, 150)
+            summary_result, diag = get_tags_summary(
+                client_obj, file_ids=file_ids, tag_service=tag_service)
+            total_distinct = len(summary_result)
+            if result_limit_int > 0 and total_distinct > result_limit_int:
                 summary_result = summary_result[:result_limit_int]
-                result = result + f" (Showing {len(summary_result)} of {len(file_ids)} files, top {result_limit_int} tags by count)"
+            cover_note = _coverage_note(tag_service, diag)
+            result = (f"The {len(file_ids)} given file ids are above the trs threshold {trs}, so "
+                      f"here is a tag-count summary (showing the top {len(summary_result)} of "
+                      f"{total_distinct} distinct tags by count).{cover_note} ")
             result = result + str(summary_result)
         else:
             data = get_tags(client_obj, file_ids=file_ids, tag_service=tag_service)
