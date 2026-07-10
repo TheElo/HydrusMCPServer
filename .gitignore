@@ -1,0 +1,23 @@
+old/
+dev/
+tests/
+
+# Virtual environments
+.venv
+.env
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+dist/
+
+requirements.txt
+
+# Cache and local folders
+.cache/
+.kilocode/
+docs/
+__pycache__/
+*.pyc
