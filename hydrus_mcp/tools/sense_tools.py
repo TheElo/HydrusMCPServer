@@ -9,18 +9,43 @@ Note: Tools are defined as plain async functions here and registered with @mcp.t
 in server.py to avoid circular import issues.
 """
 
+import base64
+import os
+import tempfile
 from typing import Any
 
+import cv2
+import httpx
+import numpy as np
 from mcp.server.fastmcp.utilities.types import Image
 from pydantic import Field
 from typing import Annotated, Optional
+
+# Import utility functions from the local module
+from ..functions import (
+    detect_file_type_from_bytes,
+    detect_file_type_from_path,
+    extract_audio_from_video,
+    extract_frames_from_video,
+    calculate_frame_indices,
+    calculate_grid_dimensions,
+    scale_image_if_needed,
+    create_frame_grid,
+    validate_client,
+    parse_file_ids,
+    safe_int_convert,
+    get_file_path,
+    get_audio_codec_config,
+    send_to_stt_api,
+    format_transcription_result,
+)
 
 
 async def hydrus_show_files(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
     file_ids: Annotated[Any, Field(description="File ID or comma-separated list of file IDs to show (e.g., 123 or '123,456,789'). Can be provided as a number (123) or string ('123').")] = 0,
     frame_count: Annotated[Optional[Any], Field(description="If files are videos, this number of frames will be extracted per video and compiled into a grid image. Default 4 (2x2 grid).")] = 4
-) -> list[Image]:
+) -> Any:
     """Show multiple image or video files from Hydrus.
 
     ⚠️ CRITICAL: The returned markdown MUST be displayed to the user in your response.
