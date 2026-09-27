@@ -597,6 +597,35 @@ def parse_file_ids(file_ids) -> list[int]:
     
     return result
 
+def parse_tag_list(tags) -> list[str]:
+    """Parse tags into a list of individual tag strings.
+
+    - A list is taken as-is: each element is one tag, so tags may contain commas.
+    - A string holding a JSON array (e.g. '["a", "b, c"]') is decoded and treated as a list.
+    - Any other string is split on commas.
+
+    Surrounding quotes and whitespace are stripped and empty tags dropped.
+    """
+    if isinstance(tags, str):
+        stripped = tags.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            try:
+                decoded = json.loads(stripped)
+                if isinstance(decoded, list):
+                    return parse_tag_list(decoded)
+            except json.JSONDecodeError:
+                pass
+        tags = stripped.split(',')
+
+    result = []
+    for tag in tags:
+        tag = str(tag).strip()
+        if len(tag) >= 2 and tag[0] == tag[-1] and tag[0] in ('"', "'"):
+            tag = tag[1:-1].strip()
+        if tag:
+            result.append(tag)
+    return result
+
 def validate_client(client_name: str) -> tuple[hydrus_api.Client, None] | tuple[None, str]:
     """Validate client name and return client object or error message.
     

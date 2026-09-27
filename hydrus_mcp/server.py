@@ -56,7 +56,7 @@ from .functions import (
     detect_file_type_from_bytes, detect_file_type_from_path, extract_frames_from_video,
     extract_tabs_from_pages, calculate_frame_indices, calculate_grid_dimensions,
     scale_image_if_needed, create_frame_grid, get_page_list, validate_client,
-    parse_file_ids, safe_bool_convert, safe_int_convert, get_file_path,
+    parse_file_ids, parse_tag_list, safe_bool_convert, safe_int_convert, get_file_path,
     find_page_by_name, get_page_info, get_service_key_by_name, load_clients_from_secret,
     get_client_by_name, parse_hydrus_tags, get_tags_summary, get_tags, get_viewing_stat,
     format_timestamp, extract_tags_by_service, format_single_metadata,
@@ -314,10 +314,10 @@ def _coverage_note(tag_service, diag):
 @mcp.tool()
 async def hydrus_get_tags(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
-    content: Annotated[Any, Field(description="Content to process - query string, comma-separated file IDs, or page key")] = "",
+    content: Annotated[str | list[str], Field(description="Content to process - query string, comma-separated file IDs, or page key. May also be a list of tags or file IDs.")] = "",
     content_type: Annotated[str, Field(description="Type of content - 'file_ids', 'query', or 'page_key' (default: 'query')")] = "query",
     tag_service: Annotated[str, Field(description="Tag service name (default: 'all known tags')")] = "all known tags",
-    trs: Annotated[Any, Field(description="Threshold for summary view. If the threshold is lower than the received file ids (either directly or from query) then the summary view is used which only returns tags and their counts from the results instead (default: '100')")] = "50",
+    trs: Annotated[Any, Field(description="Threshold for summary view. If the threshold is lower than the received file ids (either directly or from query) then the summary view is used which only returns tags and their counts from the results instead (default: '50')")] = "50",
     limit: Annotated[Any, Field(description="Caps the SAMPLE of files the tag distribution is computed over (default 1000). The TRUE total match count is always reported separately. Set to 0 for the full match set (accurate but slower on large queries).")] = "1000",
     result_limit: Annotated[Any, Field(description="Limits the number of top tags shown in summary view. Default 150.")] = "150"
 ) -> str:
@@ -329,7 +329,13 @@ async def hydrus_get_tags(
     if error:
         return error
     
-    if not content.strip():
+    if isinstance(content, list):
+        content = [item.strip() for item in content if item.strip()]
+        if content_type == "page_key":
+            if len(content) != 1:
+                return "❌ Error: page_key content must be a single page key"
+            content = content[0]
+    if not content or (isinstance(content, str) and not content.strip()):
         return "❌ Error: Content is required (query, file IDs, or page key)"
 
     # Validate content_type parameter
@@ -352,7 +358,8 @@ async def hydrus_get_tags(
                 # Search WITHOUT a baked-in `system:limit` so result_count is the TRUE match
                 # total. `limit` now caps only the SAMPLE the tag distribution is computed over
                 # (the true total is always reported); limit<=0 computes over the full match set.
-                tags = parse_hydrus_tags(content)
+                # A list is taken as exact tags (AND-ed); strings use the full query syntax
+                tags = parse_tag_list(content) if isinstance(content, list) else parse_hydrus_tags(content)
 
                 tag_service_key = str(get_service_key_by_name(client_obj, tag_service))
 
@@ -854,7 +861,7 @@ async def hydrus_add_tags(
     client_name: Annotated[str, Field(description="Name of the Hydrus client")] = "",
     file_ids: Annotated[Any, Field(description="File ID or comma-separated file IDs to add tags to (e.g., 123 or 123,456,789)")] = 0,
     target_tag_service: Annotated[str, Field(description="Name of the tag service to add tags to")] = "",
-    tags: Annotated[str, Field(description="Comma-separated list of tags to add (e.g., 'character:alice,rating:safe')")] = ""
+    tags: Annotated[str | list[str], Field(description="Tags to add, as a list (e.g., ['creator:alice', 'title:crop shirt, cat ear']) or a comma-separated string (e.g., 'character:alice,rating:safe').")] = ""
 ) -> str:
     """Add tags to files in Hydrus client.
     
@@ -879,8 +886,8 @@ async def hydrus_add_tags(
         return "❌ Error: File IDs are required"
     if not target_tag_service.strip():
         return "❌ Error: Target tag service is required"
-    if not tags.strip():
-        return "❌ Error: Tags are required (comma-separated list)"
+    if not parse_tag_list(tags):
+        return "❌ Error: Tags are required (list or comma-separated string)"
     
     # Parse whitelist configuration
     # Expected format: "client1:service1,service2|client2:service3,service4"
@@ -911,9 +918,7 @@ async def hydrus_add_tags(
             return "❌ Error: No valid file IDs provided"
         
         # Parse tags
-        tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
-        if not tags_list:
-            return "❌ Error: No valid tags provided"
+        tags_list = parse_tag_list(tags)
         
         # Get service key for the target tag service
         service_key = get_service_key_by_name(client_obj, target_tag_service)
